@@ -1,0 +1,25 @@
+{
+  "name": "queue_sys",
+  "version": "1.0.0",
+  "description": "Vercel serverless middleware for queue-based hall ticket downloads",
+  "type": "module",
+  "main": "api/auth/login.js",
+  "scripts": {
+    "dev": "echo \"Local dev script disabled\"",
+    "test": "echo \"No automated tests configured\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/MahiBoghra/queue_sys.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/MahiBoghra/queue_sys/issues"
+  },
+  "homepage": "https://github.com/MahiBoghra/queue_sys#readme",
+  "dependencies": {
+    "appwrite": "^23.0.0"
+  }
+}
