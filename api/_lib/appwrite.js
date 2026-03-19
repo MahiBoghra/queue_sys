@@ -12,7 +12,11 @@ import {
   findMockUser,
   getMockDashboardInfo,
   getMockHallticket,
+  getMockHallticketStatusMap,
+  getMockStudentHallticketData,
   hasMockIdentifier,
+  listMockStudents,
+  markMockHallticketDownloaded,
 } from "./mockStore.js";
 
 function hasAppwriteConfig() {
@@ -226,5 +230,115 @@ export async function getHallticket(userId) {
     hallticketId: hallticket.hallticketId || hallticket.$id,
     examName: hallticket.examName,
     pdfUrl: hallticket.pdfUrl,
+    isDownloaded: Boolean(hallticket.isDownloaded),
   };
+}
+
+export async function getStudentHallticketData(userId) {
+  const mode = ensureUsersDataMode();
+  if (mode === "mock") {
+    return getMockStudentHallticketData(userId);
+  }
+
+  const databases = createDatabasesClient();
+  const response = await databases.listDocuments(
+    APPWRITE_DATABASE_ID,
+    APPWRITE_USERS_COLLECTION_ID,
+    [Query.equal("userId", userId), Query.equal("role", "student"), Query.limit(1)],
+  );
+
+  if (!response.documents.length) return null;
+  const user = response.documents[0];
+
+  return {
+    name: user.name,
+    rollNumber: user.rollNumber,
+    course: user.course,
+    semester: Number(user.semester),
+    examDate: user.examDate,
+    center: user.center,
+  };
+}
+
+export async function markHallticketDownloaded(userId) {
+  const mode = ensureUsersDataMode();
+  if (mode === "mock") {
+    return markMockHallticketDownloaded(userId);
+  }
+
+  if (!isHallticketConfigPresent()) {
+    throw new Error(
+      "Missing APPWRITE_HALLTICKETS_COLLECTION_ID. Configure it to update hall ticket download status",
+    );
+  }
+
+  const databases = createDatabasesClient();
+  const existing = await databases.listDocuments(
+    APPWRITE_DATABASE_ID,
+    APPWRITE_HALLTICKETS_COLLECTION_ID,
+    [Query.equal("userId", userId), Query.limit(1)],
+  );
+
+  if (!existing.documents.length) return null;
+  const document = existing.documents[0];
+  return databases.updateDocument(
+    APPWRITE_DATABASE_ID,
+    APPWRITE_HALLTICKETS_COLLECTION_ID,
+    document.$id,
+    { isDownloaded: true },
+  );
+}
+
+export async function listStudentsForMonitor() {
+  const mode = ensureUsersDataMode();
+  if (mode === "mock") {
+    return listMockStudents();
+  }
+
+  const databases = createDatabasesClient();
+  const response = await databases.listDocuments(
+    APPWRITE_DATABASE_ID,
+    APPWRITE_USERS_COLLECTION_ID,
+    [Query.equal("role", "student"), Query.limit(1000)],
+  );
+
+  return response.documents.map((user) => ({
+    userId: user.userId || user.$id,
+    name: user.name,
+    rollNumber: user.rollNumber,
+    course: user.course,
+    semester: Number(user.semester),
+    examDate: user.examDate,
+    center: user.center,
+  }));
+}
+
+export async function getHallticketStatusMap() {
+  const mode = ensureUsersDataMode();
+  if (mode === "mock") {
+    return getMockHallticketStatusMap();
+  }
+
+  if (!isHallticketConfigPresent()) {
+    throw new Error(
+      "Missing APPWRITE_HALLTICKETS_COLLECTION_ID. Configure it to read hall ticket monitor status",
+    );
+  }
+
+  const databases = createDatabasesClient();
+  const response = await databases.listDocuments(
+    APPWRITE_DATABASE_ID,
+    APPWRITE_HALLTICKETS_COLLECTION_ID,
+    [Query.limit(1000)],
+  );
+
+  const statusMap = new Map();
+  response.documents.forEach((doc) => {
+    statusMap.set(doc.userId, {
+      isDownloaded: Boolean(doc.isDownloaded),
+      hallticketId: doc.hallticketId || doc.$id,
+    });
+  });
+
+  return statusMap;
 }

@@ -12,7 +12,7 @@ const requestBtn = document.getElementById("request-btn");
 const statusText = document.getElementById("status-text");
 const queuePosition = document.getElementById("queue-position");
 const downloadBox = document.getElementById("download-box");
-const downloadLink = document.getElementById("download-link");
+const downloadJsonBtn = document.getElementById("download-json-btn");
 const hallticketExam = document.getElementById("hallticket-exam");
 const logoutBtn = document.getElementById("logout-btn");
 const sessionTimer = document.getElementById("session-timer");
@@ -21,6 +21,10 @@ const facultyGrid = document.getElementById("faculty-grid");
 const studentActions = document.getElementById("student-actions");
 const department = document.getElementById("department");
 const designation = document.getElementById("designation");
+const facultyMonitorBox = document.getElementById("faculty-monitor-box");
+const refreshMonitorBtn = document.getElementById("refresh-monitor-btn");
+const monitorTbody = document.getElementById("monitor-tbody");
+const monitorMeta = document.getElementById("monitor-meta");
 
 let pollTimer = null;
 let sessionExpiresAt = null;
@@ -66,12 +70,56 @@ function setStatus(message, position = null) {
 function showDownload(hallticket) {
   if (!hallticket) return;
   hallticketExam.textContent = hallticket.examName;
-  downloadLink.href = hallticket.pdfUrl;
   downloadBox.classList.remove("hidden");
 }
 
 function hideDownload() {
   downloadBox.classList.add("hidden");
+}
+
+function triggerJsonDownload(data, fileName) {
+  const jsonContent = JSON.stringify(data, null, 2);
+  const blob = new Blob([jsonContent], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+
+  URL.revokeObjectURL(url);
+}
+
+function renderMonitorRows(rows) {
+  monitorTbody.innerHTML = "";
+
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    const statusClass = row.isDownloaded ? "badge-success" : "badge-pending";
+    const downloadedLabel = row.isDownloaded ? "Yes" : "No";
+
+    tr.innerHTML = `
+      <td>${row.name}</td>
+      <td>${row.rollNumber}</td>
+      <td>${row.status}</td>
+      <td>${row.queuePosition}</td>
+      <td><span class="badge ${statusClass}">${downloadedLabel}</span></td>
+    `;
+
+    monitorTbody.appendChild(tr);
+  });
+}
+
+async function refreshFacultyMonitor() {
+  try {
+    const monitorData = await api("/api/faculty/queue-monitor", { method: "GET" });
+    monitorMeta.textContent = `Queue length: ${monitorData.queueLength} | Refreshed: ${new Date(monitorData.refreshedAt).toLocaleTimeString()}`;
+    renderMonitorRows(monitorData.rows || []);
+  } catch (error) {
+    monitorMeta.textContent = error.message;
+  }
 }
 
 function switchToDashboard(data) {
@@ -85,11 +133,14 @@ function switchToDashboard(data) {
     studentGrid.classList.add("hidden");
     studentActions.classList.add("hidden");
     facultyGrid.classList.remove("hidden");
+    facultyMonitorBox.classList.remove("hidden");
     department.textContent = data.dashboardInfo.department || "N/A";
     designation.textContent = data.dashboardInfo.designation || "N/A";
     setStatus("Faculty account logged in. Queue and hall ticket download are for students.");
     hideDownload();
+    refreshFacultyMonitor();
   } else {
+    facultyMonitorBox.classList.add("hidden");
     facultyGrid.classList.add("hidden");
     studentGrid.classList.remove("hidden");
     studentActions.classList.remove("hidden");
@@ -270,6 +321,22 @@ requestBtn.addEventListener("click", async () => {
   }
 });
 
+downloadJsonBtn.addEventListener("click", async () => {
+  try {
+    const payload = await api("/api/hallticket/download-json", { method: "GET" });
+    triggerJsonDownload(payload.hallticketData, payload.downloadFileName);
+
+    await api("/api/hallticket/mark-downloaded", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+
+    setStatus("Hall ticket JSON downloaded and marked as completed.");
+  } catch (error) {
+    setStatus(error.message);
+  }
+});
+
 logoutBtn.addEventListener("click", async () => {
   try {
     await api("/api/auth/logout", { method: "POST", body: "{}" });
@@ -281,6 +348,7 @@ logoutBtn.addEventListener("click", async () => {
 loginTab.addEventListener("click", showLoginMode);
 signupTab.addEventListener("click", showSignupMode);
 signupRole.addEventListener("change", updateSignupFieldsByRole);
+refreshMonitorBtn.addEventListener("click", refreshFacultyMonitor);
 
 updateSignupFieldsByRole();
 showLoginMode();

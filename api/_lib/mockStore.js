@@ -48,11 +48,13 @@ const halltickets = {
     hallticketId: "ht-1001",
     examName: "Final Semester Examination 2026",
     pdfUrl: "https://example.com/hallticket/ht-1001.pdf",
+    isDownloaded: false,
   },
   "u-1002": {
     hallticketId: "ht-1002",
     examName: "Final Semester Examination 2026",
     pdfUrl: "https://example.com/hallticket/ht-1002.pdf",
+    isDownloaded: false,
   },
 };
 
@@ -88,6 +90,51 @@ export function getMockDashboardInfo(userId) {
 
 export function getMockHallticket(userId) {
   return halltickets[userId] || null;
+}
+
+export function markMockHallticketDownloaded(userId) {
+  if (!halltickets[userId]) return null;
+  halltickets[userId].isDownloaded = true;
+  return halltickets[userId];
+}
+
+export function getMockStudentHallticketData(userId) {
+  const user = users.find((item) => item.userId === userId && item.role === "student");
+  if (!user) return null;
+
+  return {
+    name: user.name,
+    rollNumber: user.rollNumber,
+    course: user.course,
+    semester: Number(user.semester),
+    examDate: user.examDate,
+    center: user.center,
+  };
+}
+
+export function listMockStudents() {
+  return users
+    .filter((item) => item.role === "student")
+    .map((item) => ({
+      userId: item.userId,
+      name: item.name,
+      rollNumber: item.rollNumber,
+      course: item.course,
+      semester: Number(item.semester),
+      examDate: item.examDate,
+      center: item.center,
+    }));
+}
+
+export function getMockHallticketStatusMap() {
+  const statusMap = new Map();
+  Object.entries(halltickets).forEach(([userId, hallticket]) => {
+    statusMap.set(userId, {
+      isDownloaded: Boolean(hallticket.isDownloaded),
+      hallticketId: hallticket.hallticketId,
+    });
+  });
+  return statusMap;
 }
 
 export function hasMockIdentifier(role, identifier) {

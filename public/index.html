@@ -143,6 +143,28 @@
           </div>
         </div>
 
+        <div class="status-box hidden" id="faculty-monitor-box">
+          <div class="header-row">
+            <h3>Faculty Live Queue Monitor</h3>
+            <button id="refresh-monitor-btn" class="secondary" type="button">Refresh</button>
+          </div>
+          <p id="monitor-meta" class="small-text"></p>
+          <div class="table-wrap">
+            <table class="monitor-table">
+              <thead>
+                <tr>
+                  <th>Student Name</th>
+                  <th>Roll Number</th>
+                  <th>Status</th>
+                  <th>Queue Position</th>
+                  <th>Downloaded</th>
+                </tr>
+              </thead>
+              <tbody id="monitor-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="actions" id="student-actions">
           <button id="request-btn">Generate Hall Ticket</button>
         </div>
@@ -156,7 +178,7 @@
         <div id="download-box" class="download-box hidden">
           <h3>Hall Ticket Ready</h3>
           <p id="hallticket-exam"></p>
-          <a id="download-link" href="#" target="_blank" rel="noreferrer">Download Hall Ticket</a>
+          <button id="download-json-btn" type="button">Download Hall Ticket JSON</button>
         </div>
       </section>
     </main>

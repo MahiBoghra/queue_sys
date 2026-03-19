@@ -204,6 +204,43 @@ button:hover,
   font-weight: 600;
 }
 
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.monitor-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+}
+
+.monitor-table th,
+.monitor-table td {
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  padding: 10px 8px;
+  font-size: 0.92rem;
+}
+
+.badge {
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  display: inline-block;
+}
+
+.badge-success {
+  background: #d9f7e7;
+  color: #1c7c45;
+}
+
+.badge-pending {
+  background: #ffecc8;
+  color: #8c5d00;
+}
+
 @media (max-width: 720px) {
   .exam-grid {
     grid-template-columns: 1fr;

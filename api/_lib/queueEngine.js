@@ -143,3 +143,39 @@ export function getStatus(userId) {
     waitMessage: "Server is busy. Please wait in the virtual queue.",
   };
 }
+
+export function getQueueSnapshot() {
+  processQueue();
+
+  const snapshot = {
+    queue: [...globalState.queue],
+    jobs: {},
+  };
+
+  globalState.jobByUserId.forEach((job, userId) => {
+    snapshot.jobs[userId] = {
+      status: job.status,
+      expiresAt: job.expiresAt || null,
+    };
+  });
+
+  return snapshot;
+}
+
+export function getQueueMetaForUser(userId) {
+  processQueue();
+
+  const job = globalState.jobByUserId.get(userId);
+  if (!job) {
+    return { status: "idle", queuePosition: 0 };
+  }
+
+  if (job.status === "queued") {
+    return {
+      status: "waiting",
+      queuePosition: Math.max(globalState.queue.indexOf(userId) + 1, 0),
+    };
+  }
+
+  return { status: "ready", queuePosition: 0 };
+}
