@@ -21,7 +21,7 @@ export default async function handler(req, res) {
 
     const hallticketUserId = session.rollNumber || session.identifier || session.userId;
 
-    const status = await getPersistentQueueStatus(hallticketUserId, { processQueue: false });
+    const status = await getPersistentQueueStatus(hallticketUserId);
     return sendJson(res, 200, status);
   } catch (error) {
     return sendJson(res, 500, { error: "Status check failed", details: error.message });
