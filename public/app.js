@@ -26,10 +26,41 @@ const refreshMonitorBtn = document.getElementById("refresh-monitor-btn");
 const monitorTbody = document.getElementById("monitor-tbody");
 const monitorMeta = document.getElementById("monitor-meta");
 
+const realtimeModal = document.getElementById("realtime-modal");
+const modalName = document.getElementById("modal-name");
+const modalExam = document.getElementById("modal-exam");
+const modalTime = document.getElementById("modal-time");
+const closeModalBtn = document.getElementById("close-modal-btn");
+
+const facultyQueueLimit = document.getElementById("faculty-queue-limit");
+const updateLimitBtn = document.getElementById("update-limit-btn");
+const limitUpdateMsg = document.getElementById("limit-update-msg");
+
+let appwriteClient = null;
+let appwriteConfig = null;
+let realtimeUnsubscribe = null;
+
 let pollTimer = null;
 let sessionExpiresAt = null;
 let sessionCountdown = null;
 let currentRole = "student";
+let currentUserData = null;
+
+async function initAppwrite() {
+  if (appwriteClient) return;
+  try {
+    const config = await api("/api/hallticket/public-config", { method: "GET" });
+    if (config.endpoint && config.projectId) {
+      appwriteConfig = config;
+      appwriteClient = new window.Appwrite.Client()
+          .setEndpoint(config.endpoint)
+          .setProject(config.projectId);
+    }
+  } catch (error) {
+    console.error("Failed to init Appwrite", error);
+  }
+}
+
 
 function showLoginMode() {
   loginTab.classList.add("active");
@@ -138,6 +169,7 @@ function switchToDashboard(data) {
     designation.textContent = data.dashboardInfo.designation || "N/A";
     setStatus("Faculty account logged in. Queue and hall ticket download are for students.");
     hideDownload();
+    fetchFacultyQueueLimit();
     refreshFacultyMonitor();
   } else {
     facultyMonitorBox.classList.add("hidden");
@@ -149,6 +181,10 @@ function switchToDashboard(data) {
     document.getElementById("examDate").textContent = data.dashboardInfo.examDate;
     document.getElementById("center").textContent = data.dashboardInfo.center;
     setStatus("No active request yet.");
+    currentUserData = {
+      name: data.user.name,
+      ...data.dashboardInfo
+    };
   }
 
   sessionExpiresAt = data.sessionExpiresAt;
@@ -162,8 +198,14 @@ function switchToLogin() {
   hideDownload();
   setStatus("No active request yet.");
   clearInterval(sessionCountdown);
-  clearInterval(pollTimer);
-  pollTimer = null;
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+  if (realtimeUnsubscribe) {
+    realtimeUnsubscribe();
+    realtimeUnsubscribe = null;
+  }
 }
 
 function startSessionCountdown() {
@@ -215,30 +257,27 @@ async function checkSession() {
   }
 }
 
-async function pollQueueStatus() {
+async function fetchFacultyQueueLimit() {
   try {
-    const data = await api("/api/hallticket/status", { method: "GET" });
-
-    if (data.status === "ready") {
-      setStatus(data.waitMessage || "Hall ticket ready");
-      showDownload(data.hallticket);
-      clearInterval(pollTimer);
-      pollTimer = null;
-      return;
-    }
-
-    if (data.status === "queued") {
-      hideDownload();
-      setStatus(data.waitMessage, data.position);
-      return;
-    }
-
-    hideDownload();
-    setStatus(data.waitMessage || "No active request.");
-  } catch (error) {
-    setStatus(error.message);
+    const config = await api("/api/faculty/config", { method: "GET" });
+    facultyQueueLimit.value = config.queueLimit;
+  } catch (e) {
+    console.warn("Could not fetch queue limit", e);
   }
 }
+
+updateLimitBtn.addEventListener("click", async () => {
+  try {
+    const lim = parseInt(facultyQueueLimit.value, 10);
+    if (!lim || lim < 1) return;
+    limitUpdateMsg.textContent = "Updating...";
+    await api("/api/faculty/config", { method: "POST", body: JSON.stringify({ queueLimit: lim }) });
+    limitUpdateMsg.textContent = "Saved!";
+    setTimeout(() => limitUpdateMsg.textContent = "", 2000);
+  } catch (e) {
+    limitUpdateMsg.textContent = "Error";
+  }
+});
 
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -306,19 +345,52 @@ requestBtn.addEventListener("click", async () => {
 
     if (data.status === "ready") {
       setStatus(data.waitMessage || "Hall ticket ready.");
-      showDownload(data.hallticket);
+      showDownloadModal(data.hallticket);
       return;
     }
 
     hideDownload();
-    setStatus(data.waitMessage, data.position);
+    setStatus(data.waitMessage, "Your ticket is in PENDING/ACTIVE state.");
 
-    if (!pollTimer) {
-      pollTimer = setInterval(pollQueueStatus, 2000);
+    if (appwriteClient && appwriteConfig && data.docId) {
+      if (realtimeUnsubscribe) realtimeUnsubscribe();
+      
+      const channel = `databases.${appwriteConfig.databaseId}.collections.${appwriteConfig.hallticketsCollectionId}.documents.${data.docId}`;
+      setStatus(`Subscribed to Realtime Updates for document: ${data.docId}...`);
+      
+      realtimeUnsubscribe = appwriteClient.subscribe(channel, response => {
+        if (response.events.includes("databases.*.collections.*.documents.*.update")) {
+            const updated = response.payload;
+            if (updated.status === "DONE" || updated.status === "READY") {
+                setStatus("Hall ticket ready.");
+                showDownloadModal(updated);
+                if (realtimeUnsubscribe) { realtimeUnsubscribe(); realtimeUnsubscribe = null; }
+            } else {
+                setStatus(`Status updated: ${updated.status}`);
+            }
+        }
+      });
+    } else {
+      setStatus("Realtime not configured. Cannot subscribe to updates.");
     }
   } catch (error) {
     setStatus(error.message);
   }
+});
+
+function showDownloadModal(hallticket) {
+  realtimeModal.classList.remove("hidden");
+  modalName.textContent = currentUserData?.name || "Student";
+  modalExam.textContent = hallticket.examName || "Final Exams";
+  modalTime.textContent = currentUserData?.examDate || "N/A";
+  
+  // also prepare the usual JSON box logic
+  hallticketExam.textContent = hallticket.examName;
+}
+
+closeModalBtn.addEventListener("click", () => {
+    realtimeModal.classList.add("hidden");
+    downloadBox.classList.remove("hidden");
 });
 
 downloadJsonBtn.addEventListener("click", async () => {
@@ -352,4 +424,6 @@ refreshMonitorBtn.addEventListener("click", refreshFacultyMonitor);
 
 updateSignupFieldsByRole();
 showLoginMode();
-checkSession();
+initAppwrite().then(() => {
+  checkSession();
+});

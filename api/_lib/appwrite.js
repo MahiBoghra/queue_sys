@@ -6,6 +6,7 @@ import {
   APPWRITE_HALLTICKETS_COLLECTION_ID,
   APPWRITE_PROJECT_ID,
   APPWRITE_USERS_COLLECTION_ID,
+  APPWRITE_CONFIG_COLLECTION_ID,
 } from "./config.js";
 import {
   createMockUser,
@@ -41,7 +42,7 @@ function hasAnyAppwriteConfig() {
 }
 
 function isHallticketConfigPresent() {
-  return Boolean(APPWRITE_HALLTICKETS_COLLECTION_ID);
+  return Boolean(APPWRITE_HALLTICKETS_COLLECTION_ID && APPWRITE_CONFIG_COLLECTION_ID);
 }
 
 function ensureUsersDataMode() {
@@ -231,7 +232,73 @@ export async function getHallticket(userId) {
     examName: hallticket.examName,
     pdfUrl: hallticket.pdfUrl,
     isDownloaded: Boolean(hallticket.isDownloaded),
+    status: hallticket.status,
+    queuePosition: hallticket.queuePosition
   };
+}
+
+export async function getQueueConfig() {
+  const mode = ensureUsersDataMode();
+  if (mode === "mock") return { queueLimit: 5 };
+
+  if (!isHallticketConfigPresent()) return { queueLimit: 5 };
+
+  const databases = createDatabasesClient();
+  const response = await databases.listDocuments(
+    APPWRITE_DATABASE_ID,
+    APPWRITE_CONFIG_COLLECTION_ID,
+    [Query.limit(1)]
+  );
+
+  if (!response.documents.length) {
+    // Return default if not found
+    return { queueLimit: 5 };
+  }
+  return { queueLimit: response.documents[0].queueLimit || 5, docId: response.documents[0].$id };
+}
+
+export async function setQueueConfig(limit) {
+  const mode = ensureUsersDataMode();
+  if (mode === "mock") return { queueLimit: limit };
+
+  if (!isHallticketConfigPresent()) return { queueLimit: limit };
+
+  const databases = createDatabasesClient();
+  const response = await databases.listDocuments(
+    APPWRITE_DATABASE_ID,
+    APPWRITE_CONFIG_COLLECTION_ID,
+    [Query.limit(1)]
+  );
+
+  if (!response.documents.length) {
+    await databases.createDocument(APPWRITE_DATABASE_ID, APPWRITE_CONFIG_COLLECTION_ID, ID.unique(), { queueLimit: limit });
+  } else {
+    await databases.updateDocument(APPWRITE_DATABASE_ID, APPWRITE_CONFIG_COLLECTION_ID, response.documents[0].$id, { queueLimit: limit });
+  }
+  return { queueLimit: limit };
+}
+
+export async function getActiveQueueCount() {
+  const mode = ensureUsersDataMode();
+  if (mode === "mock") return 0;
+  
+  const databases = createDatabasesClient();
+  const response = await databases.listDocuments(
+    APPWRITE_DATABASE_ID,
+    APPWRITE_HALLTICKETS_COLLECTION_ID,
+    [Query.equal("status", "ACTIVE")]
+  );
+  return response.total;
+}
+
+export async function updateHallticketQueueStatus(docId, status, queuePosition = 0) {
+  const databases = createDatabasesClient();
+  return databases.updateDocument(
+    APPWRITE_DATABASE_ID,
+    APPWRITE_HALLTICKETS_COLLECTION_ID,
+    docId,
+    { status, queuePosition }
+  );
 }
 
 export async function getStudentHallticketData(userId) {

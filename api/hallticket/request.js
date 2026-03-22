@@ -1,7 +1,6 @@
-import { getHallticket } from "../_lib/appwrite.js";
+import { getHallticket, getQueueConfig, getActiveQueueCount, updateHallticketQueueStatus } from "../_lib/appwrite.js";
 import { parseCookies, sendJson, onlyPost } from "../_lib/http.js";
 import { verifySessionToken } from "../_lib/session.js";
-import { requestSlot } from "../_lib/queueEngine.js";
 
 export default async function handler(req, res) {
   if (!onlyPost(req, res)) return;
@@ -25,14 +24,41 @@ export default async function handler(req, res) {
       return sendJson(res, 404, { error: "Hall ticket not found for this user" });
     }
 
-    const queueResult = requestSlot(session.userId, hallticket);
+    if (hallticket.status === "DONE" || hallticket.status === "READY") {
+      return sendJson(res, 200, {
+        status: "ready",
+        waitMessage: "Your hall ticket is ready.",
+        hallticket,
+        docId: hallticket.hallticketId
+      });
+    }
+
+    if (hallticket.status === "ACTIVE" || hallticket.status === "PENDING") {
+      return sendJson(res, 200, {
+        status: "queued",
+        queueStatus: hallticket.status,
+        waitMessage: "Server is processing. Please wait in the virtual queue.",
+        docId: hallticket.hallticketId,
+        hallticket
+      });
+    }
+
+    const config = await getQueueConfig();
+    const activeCount = await getActiveQueueCount();
+    const isSlotAvailable = activeCount < config.queueLimit;
+    const newStatus = isSlotAvailable ? "ACTIVE" : "PENDING";
+    const queuePosition = Date.now(); // Simple chronological sorting
+
+    await updateHallticketQueueStatus(hallticket.hallticketId, newStatus, queuePosition);
 
     return sendJson(res, 200, {
-      ...queueResult,
-      serverMeta: {
-        rateLimitPerSecond: Number(process.env.QUEUE_RATE_LIMIT_PER_SECOND || 5),
-      },
+        status: "queued",
+        queueStatus: newStatus,
+        docId: hallticket.hallticketId,
+        hallticket,
+        waitMessage: "Server is processing. Please wait in the virtual queue.",
     });
+
   } catch (error) {
     return sendJson(res, 500, { error: "Request failed", details: error.message });
   }

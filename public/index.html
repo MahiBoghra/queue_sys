@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>University Hall Ticket Queue Portal</title>
     <link rel="stylesheet" href="/styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/appwrite@13.0.1"></script>
   </head>
   <body>
     <div class="bg-shape bg-shape-1"></div>
@@ -148,6 +149,12 @@
             <h3>Faculty Live Queue Monitor</h3>
             <button id="refresh-monitor-btn" class="secondary" type="button">Refresh</button>
           </div>
+          <div style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+            <label for="faculty-queue-limit">Queue Limit:</label>
+            <input type="number" id="faculty-queue-limit" min="1" style="width: 80px; padding: 0.25rem;">
+            <button id="update-limit-btn" class="secondary" type="button" style="padding: 0.25rem 0.5rem;">Update</button>
+            <span id="limit-update-msg" class="small-text"></span>
+          </div>
           <p id="monitor-meta" class="small-text"></p>
           <div class="table-wrap">
             <table class="monitor-table">
@@ -179,6 +186,18 @@
           <h3>Hall Ticket Ready</h3>
           <p id="hallticket-exam"></p>
           <button id="download-json-btn" type="button">Download Hall Ticket JSON</button>
+        </div>
+
+        <div id="realtime-modal" class="modal hidden">
+          <div class="modal-content card">
+            <h2>Your Hall Ticket is Ready!</h2>
+            <div class="modal-details">
+              <p><strong>Name:</strong> <span id="modal-name"></span></p>
+              <p><strong>Exam:</strong> <span id="modal-exam"></span></p>
+              <p><strong>Time:</strong> <span id="modal-time"></span></p>
+            </div>
+            <button id="close-modal-btn">Close & Complete Download</button>
+          </div>
         </div>
       </section>
     </main>
