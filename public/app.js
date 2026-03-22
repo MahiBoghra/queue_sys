@@ -347,7 +347,10 @@ async function api(path, options = {}) {
 
   const data = await response.json();
   if (!response.ok) {
-    throw new Error(data.error || "Request failed");
+    const message = data.details
+      ? `${data.error || "Request failed"}: ${data.details}`
+      : data.error || "Request failed";
+    throw new Error(message);
   }
 
   return data;

@@ -84,6 +84,24 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    return sendJson(res, 500, { error: "Request failed", details: error.message });
+    const rawMessage = error?.message || "Unknown error";
+
+    if (/collection.*not found|could not be found/i.test(rawMessage)) {
+      return sendJson(res, 500, {
+        error: "Request failed",
+        details:
+          "Appwrite collection not found. Verify APPWRITE_DATABASE_ID, APPWRITE_HALLTICKETS_COLLECTION_ID and APPWRITE_CONFIG_COLLECTION_ID in Vercel Environment Variables.",
+      });
+    }
+
+    if (/unknown attribute|attribute.*not found|invalid query/i.test(rawMessage)) {
+      return sendJson(res, 500, {
+        error: "Request failed",
+        details:
+          "Halltickets schema mismatch in Appwrite. Required attributes: userId (string), hallticketId (string), examName (string), pdfUrl (string), isDownloaded (boolean), status (string), queuePosition (integer).",
+      });
+    }
+
+    return sendJson(res, 500, { error: "Request failed", details: rawMessage });
   }
 }
