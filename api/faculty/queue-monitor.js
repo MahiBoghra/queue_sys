@@ -25,9 +25,10 @@ export default async function handler(req, res) {
     const rows = students.map((student) => {
       const queueMeta = getQueueMetaForUser(student.userId);
       const hallticketMeta = hallticketMap.get(student.userId) || { isDownloaded: false };
+      const isDownloaded = Boolean(hallticketMeta.isDownloaded) || queueMeta.status === "downloaded";
 
       let status = "Idle";
-      if (hallticketMeta.isDownloaded) {
+      if (isDownloaded) {
         status = "Downloaded";
       } else if (queueMeta.status === "ready") {
         status = "Ready";
@@ -41,7 +42,7 @@ export default async function handler(req, res) {
         rollNumber: student.rollNumber,
         status,
         queuePosition: status === "Waiting" ? queueMeta.queuePosition : 0,
-        isDownloaded: Boolean(hallticketMeta.isDownloaded),
+        isDownloaded,
       };
     });
 

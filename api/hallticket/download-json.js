@@ -19,7 +19,7 @@ export default async function handler(req, res) {
     }
 
     const queueStatus = getStatus(session.userId);
-    if (queueStatus.status !== "ready") {
+    if (queueStatus.status !== "ready" && queueStatus.status !== "downloaded") {
       return sendJson(res, 409, {
         error: "Hall ticket is not ready yet. Please wait in queue.",
         queueStatus,

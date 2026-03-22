@@ -1,6 +1,7 @@
 import { markHallticketDownloaded, getStudentHallticketData } from "../_lib/appwrite.js";
 import { parseCookies, sendJson, onlyPost } from "../_lib/http.js";
 import { verifySessionToken } from "../_lib/session.js";
+import { markDownloaded } from "../_lib/queueEngine.js";
 
 export default async function handler(req, res) {
   if (!onlyPost(req, res)) return;
@@ -16,6 +17,8 @@ export default async function handler(req, res) {
     if (session.role !== "student") {
       return sendJson(res, 403, { error: "Only students can update download status" });
     }
+
+    markDownloaded(session.userId);
 
     const updated = await markHallticketDownloaded(session.userId);
     if (!updated) {

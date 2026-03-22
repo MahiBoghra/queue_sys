@@ -1,4 +1,8 @@
-import { DOWNLOAD_WINDOW_SECONDS, QUEUE_RATE_LIMIT_PER_SECOND } from "./config.js";
+import {
+  DOWNLOAD_WINDOW_SECONDS,
+  HALLTICKET_PREPARE_SECONDS,
+  QUEUE_RATE_LIMIT_PER_SECOND,
+} from "./config.js";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -109,6 +113,26 @@ function markReady(userId, hallticket) {
   });
 }
 
+export function markDownloaded(userId) {
+  syncStateFromDisk();
+
+  const current = globalState.jobByUserId.get(userId);
+  if (!current) {
+    persistState();
+    return { status: "idle" };
+  }
+
+  globalState.queue = globalState.queue.filter((queuedUserId) => queuedUserId !== userId);
+  globalState.jobByUserId.set(userId, {
+    ...current,
+    status: "downloaded",
+    downloadedAt: Date.now(),
+  });
+
+  persistState();
+  return { status: "downloaded" };
+}
+
 function processQueue() {
   rotateWindowIfNeeded();
 
@@ -116,20 +140,32 @@ function processQueue() {
     globalState.queue.length > 0 &&
     globalState.processedCount < QUEUE_RATE_LIMIT_PER_SECOND
   ) {
-    const queuedUserId = globalState.queue.shift();
+    const queuedUserId = globalState.queue[0];
     const job = globalState.jobByUserId.get(queuedUserId);
     if (!job || !job.hallticket) continue;
+
+    const eligibleAt = Number(job.eligibleAt) || 0;
+    if (eligibleAt > Date.now()) {
+      break;
+    }
+
+    globalState.queue.shift();
 
     globalState.processedCount += 1;
     markReady(queuedUserId, job.hallticket);
   }
 }
 
-function buildQueuedMetrics(position) {
+function buildQueuedMetrics(position, eligibleAt = 0) {
   const safePosition = Math.max(Number(position) || 0, 0);
   const safeRate = Math.max(QUEUE_RATE_LIMIT_PER_SECOND, 1);
   const aheadCount = Math.max(safePosition - 1, 0);
-  const estimatedWaitSeconds = Math.ceil(safePosition / safeRate);
+  const throughputWaitSeconds = Math.ceil(safePosition / safeRate);
+  const preparationWaitSeconds = Math.max(
+    Math.ceil((Number(eligibleAt) - Date.now()) / 1000),
+    0,
+  );
+  const estimatedWaitSeconds = Math.max(throughputWaitSeconds, preparationWaitSeconds);
   const nextTurnAt = Date.now() + estimatedWaitSeconds * 1000;
 
   return {
@@ -137,6 +173,8 @@ function buildQueuedMetrics(position) {
     aheadCount,
     queueLength: globalState.queue.length,
     processingRatePerSecond: safeRate,
+    preparationWaitSeconds,
+    eligibleAt,
     estimatedWaitSeconds,
     nextTurnAt,
   };
@@ -147,6 +185,10 @@ export function requestSlot(userId, hallticket) {
   processQueue();
 
   const existing = globalState.jobByUserId.get(userId);
+
+  if (existing?.status === "downloaded") {
+    globalState.jobByUserId.delete(userId);
+  }
 
   if (existing?.status === "ready") {
     if (Date.now() > existing.expiresAt) {
@@ -165,7 +207,7 @@ export function requestSlot(userId, hallticket) {
 
   if (existing?.status === "queued") {
     const position = globalState.queue.indexOf(userId) + 1;
-    const metrics = buildQueuedMetrics(position);
+    const metrics = buildQueuedMetrics(position, existing.eligibleAt);
     persistState();
     return {
       status: "queued",
@@ -174,31 +216,32 @@ export function requestSlot(userId, hallticket) {
     };
   }
 
-  rotateWindowIfNeeded();
-
-  if (globalState.processedCount < QUEUE_RATE_LIMIT_PER_SECOND) {
-    globalState.processedCount += 1;
-    markReady(userId, hallticket);
-
-    const job = globalState.jobByUserId.get(userId);
-    persistState();
-    return {
-      status: "ready",
-      waitMessage: "Your hall ticket is ready for download.",
-      hallticket,
-      expiresAt: job.expiresAt,
-    };
-  }
-
+  const requestedAt = Date.now();
+  const eligibleAt = requestedAt + HALLTICKET_PREPARE_SECONDS * 1000;
   globalState.queue.push(userId);
   globalState.jobByUserId.set(userId, {
     userId,
     status: "queued",
-    enqueuedAt: Date.now(),
+    enqueuedAt: requestedAt,
+    eligibleAt,
     hallticket,
   });
 
-  const metrics = buildQueuedMetrics(globalState.queue.length);
+  processQueue();
+
+  const queuedJob = globalState.jobByUserId.get(userId);
+  if (queuedJob?.status === "ready") {
+    persistState();
+    return {
+      status: "ready",
+      waitMessage: "Your hall ticket is ready for download.",
+      hallticket: queuedJob.hallticket,
+      expiresAt: queuedJob.expiresAt,
+    };
+  }
+
+  const position = globalState.queue.indexOf(userId) + 1;
+  const metrics = buildQueuedMetrics(position, eligibleAt);
   persistState();
 
   return {
@@ -241,8 +284,18 @@ export function getStatus(userId) {
     };
   }
 
+  if (job.status === "downloaded") {
+    persistState();
+    return {
+      status: "downloaded",
+      hallticket: job.hallticket,
+      downloadedAt: job.downloadedAt || null,
+      waitMessage: "Hall ticket already downloaded.",
+    };
+  }
+
   const position = globalState.queue.indexOf(userId) + 1;
-  const metrics = buildQueuedMetrics(position);
+  const metrics = buildQueuedMetrics(position, job.eligibleAt);
   persistState();
   return {
     status: "queued",
@@ -288,6 +341,11 @@ export function getQueueMetaForUser(userId) {
       status: "waiting",
       queuePosition: Math.max(globalState.queue.indexOf(userId) + 1, 0),
     };
+  }
+
+  if (job.status === "downloaded") {
+    persistState();
+    return { status: "downloaded", queuePosition: 0 };
   }
 
   persistState();
