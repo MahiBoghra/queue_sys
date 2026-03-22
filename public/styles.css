@@ -1,11 +1,13 @@
 :root {
-  --bg: #f2efe5;
-  --card: #fffdfa;
-  --primary: #1d3557;
-  --accent: #d1495b;
-  --text: #212529;
-  --muted: #5c677d;
-  --line: #d7d0bf;
+  --bg: #f7fbff;
+  --card: #ffffff;
+  --primary: #0f3b8f;
+  --primary-soft: #1f65d6;
+  --accent: #2f7de1;
+  --text: #11243f;
+  --muted: #4f6683;
+  --line: #d6e3f5;
+  --soft-wash: #eef5ff;
 }
 
 * {
@@ -15,10 +17,12 @@
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  font-family: "Poppins", "Segoe UI", Tahoma, sans-serif;
   color: var(--text);
-  background: radial-gradient(circle at 20% 10%, #fff7dd 0%, var(--bg) 45%),
-    linear-gradient(130deg, #ece7d5 0%, #f7f4ea 100%);
+  background:
+    radial-gradient(circle at 5% 15%, #e6f0ff 0%, transparent 28%),
+    radial-gradient(circle at 95% 85%, #e2eeff 0%, transparent 30%),
+    linear-gradient(120deg, #f9fcff 0%, var(--bg) 100%);
 }
 
 .bg-shape {
@@ -30,34 +34,34 @@ body {
 }
 
 .bg-shape-1 {
-  width: 280px;
-  height: 280px;
-  background: #ffb4a2;
-  top: -60px;
-  right: -50px;
+  width: 340px;
+  height: 340px;
+  background: #c8dcff;
+  top: -100px;
+  right: -90px;
 }
 
 .bg-shape-2 {
-  width: 220px;
-  height: 220px;
-  background: #a8dadc;
-  bottom: -40px;
-  left: -60px;
+  width: 300px;
+  height: 300px;
+  background: #d7e8ff;
+  bottom: -90px;
+  left: -100px;
 }
 
 .container {
   position: relative;
   z-index: 1;
-  width: min(920px, 92vw);
-  margin: 40px auto;
+  width: min(1280px, 92vw);
+  margin: 42px auto;
 }
 
 .card {
   background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 18px;
-  padding: 28px;
-  box-shadow: 0 12px 30px rgba(22, 26, 29, 0.08);
+  border-radius: 20px;
+  padding: 30px;
+  box-shadow: 0 14px 36px rgba(25, 68, 134, 0.11);
   animation: slideIn 0.5s ease;
 }
 
@@ -74,13 +78,16 @@ body {
 
 .title {
   margin: 0;
-  font-size: 2rem;
+  font-size: clamp(1.9rem, 2.7vw, 2.6rem);
+  font-family: "Manrope", "Poppins", sans-serif;
+  letter-spacing: 0.01em;
   color: var(--primary);
 }
 
 .subtitle {
   color: var(--muted);
   margin-bottom: 24px;
+  max-width: 65ch;
 }
 
 .form {
@@ -112,6 +119,7 @@ select {
   padding: 10px 12px;
   font-size: 1rem;
   background: #fff;
+  color: var(--text);
 }
 
 .form-group {
@@ -131,17 +139,21 @@ button,
   color: #fff;
   text-decoration: none;
   display: inline-block;
+  transition: transform 0.2s ease, opacity 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 8px 20px rgba(22, 74, 164, 0.24);
 }
 
 button.secondary {
-  background: transparent;
+  background: #fff;
   color: var(--primary);
   border: 1px solid var(--primary);
+  box-shadow: none;
 }
 
 button:hover,
 #download-link:hover {
-  opacity: 0.92;
+  opacity: 0.95;
+  transform: translateY(-1px);
 }
 
 .hidden {
@@ -171,7 +183,7 @@ button:hover,
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 12px;
-  background: #fffcf4;
+  background: var(--soft-wash);
 }
 
 .tile h3 {
@@ -194,13 +206,13 @@ button:hover,
   padding: 14px;
   border-radius: 12px;
   border: 1px solid var(--line);
-  background: #fff;
+  background: #f8fbff;
 }
 
 .message {
   margin-top: 14px;
   min-height: 20px;
-  color: var(--accent);
+  color: #c83a50;
   font-weight: 600;
 }
 
@@ -232,13 +244,178 @@ button:hover,
 }
 
 .badge-success {
-  background: #d9f7e7;
-  color: #1c7c45;
+  background: #d8f4e7;
+  color: #1e7d4a;
 }
 
 .badge-pending {
-  background: #ffecc8;
-  color: #8c5d00;
+  background: #e7efff;
+  color: #1d56a8;
+}
+
+.hallticket-preview {
+  margin-top: 24px;
+  background: #fff;
+  border-radius: 18px;
+  border: 1px solid #cfe0fb;
+  padding: clamp(20px, 2vw, 32px);
+  box-shadow: 0 10px 26px rgba(32, 87, 174, 0.1);
+  overflow: hidden;
+  position: relative;
+}
+
+.hallticket-preview::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(105deg, rgba(18, 72, 160, 0.06) 0%, transparent 26%),
+    linear-gradient(transparent 96%, rgba(15, 59, 143, 0.08) 96%);
+  pointer-events: none;
+}
+
+.hallticket-header {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  padding-bottom: 18px;
+  border-bottom: 2px solid #dce9fc;
+}
+
+.hallticket-profile {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.profile-photo {
+  width: 94px;
+  height: 118px;
+  border: 2px dashed #85aeea;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  color: #3f6eb4;
+  font-weight: 700;
+  background: linear-gradient(170deg, #eef5ff 0%, #ffffff 100%);
+}
+
+.profile-meta h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: #153f86;
+}
+
+.meta-label {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+  color: #5e78a2;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.hallticket-title-wrap {
+  text-align: right;
+}
+
+.hallticket-kicker {
+  margin: 0;
+  color: #5a74a0;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.hallticket-title {
+  margin: 8px 0 0;
+  font-family: "Manrope", "Poppins", sans-serif;
+  font-size: clamp(1.3rem, 2.1vw, 2.05rem);
+  color: #0f377b;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.hallticket-body {
+  position: relative;
+  z-index: 1;
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 16px;
+}
+
+.hallticket-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid #cfe0fb;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.hallticket-table th,
+.hallticket-table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid #dce9fc;
+  text-align: left;
+}
+
+.hallticket-table tr:last-child th,
+.hallticket-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.hallticket-table th {
+  width: 38%;
+  background: #f3f8ff;
+  color: #214c92;
+  font-size: 0.92rem;
+}
+
+.hallticket-table td {
+  font-weight: 600;
+  color: #173d7d;
+}
+
+.static-exam-info {
+  border: 1px solid #cfe0fb;
+  border-radius: 12px;
+  padding: 14px;
+  background: linear-gradient(160deg, #f8fbff 0%, #ffffff 100%);
+}
+
+.static-exam-info h3 {
+  margin: 0 0 10px;
+  font-family: "Manrope", "Poppins", sans-serif;
+  color: #153f87;
+}
+
+.static-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.static-tile {
+  border: 1px solid #dae7fb;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.static-tile p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #5f77a0;
+}
+
+.static-tile strong {
+  display: block;
+  margin-top: 4px;
+  color: #12408b;
 }
 
 @media (max-width: 720px) {
@@ -253,5 +430,41 @@ button:hover,
 
   .container {
     margin: 24px auto;
+  }
+
+  .card {
+    padding: 20px;
+  }
+
+  .hallticket-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .hallticket-title-wrap {
+    text-align: left;
+  }
+
+  .hallticket-body {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-photo {
+    width: 80px;
+    height: 102px;
+  }
+}
+
+@media (min-width: 1920px) {
+  .container {
+    width: min(1700px, 90vw);
+  }
+
+  .card {
+    padding: 44px;
+  }
+
+  .hallticket-preview {
+    padding: 36px;
   }
 }

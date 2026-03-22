@@ -51,6 +51,23 @@ function processQueue() {
   }
 }
 
+function buildQueuedMetrics(position) {
+  const safePosition = Math.max(Number(position) || 0, 0);
+  const safeRate = Math.max(QUEUE_RATE_LIMIT_PER_SECOND, 1);
+  const aheadCount = Math.max(safePosition - 1, 0);
+  const estimatedWaitSeconds = Math.ceil(safePosition / safeRate);
+  const nextTurnAt = Date.now() + estimatedWaitSeconds * 1000;
+
+  return {
+    position: safePosition,
+    aheadCount,
+    queueLength: globalState.queue.length,
+    processingRatePerSecond: safeRate,
+    estimatedWaitSeconds,
+    nextTurnAt,
+  };
+}
+
 export function requestSlot(userId, hallticket) {
   processQueue();
 
@@ -71,9 +88,10 @@ export function requestSlot(userId, hallticket) {
 
   if (existing?.status === "queued") {
     const position = globalState.queue.indexOf(userId) + 1;
+    const metrics = buildQueuedMetrics(position);
     return {
       status: "queued",
-      position,
+      ...metrics,
       waitMessage: "Server is busy. Please wait in the virtual queue.",
     };
   }
@@ -101,9 +119,11 @@ export function requestSlot(userId, hallticket) {
     hallticket,
   });
 
+  const metrics = buildQueuedMetrics(globalState.queue.length);
+
   return {
     status: "queued",
-    position: globalState.queue.length,
+    ...metrics,
     waitMessage: "Server is busy. Please wait in the virtual queue.",
   };
 }
@@ -132,14 +152,16 @@ export function getStatus(userId) {
       status: "ready",
       hallticket: job.hallticket,
       expiresAt: job.expiresAt,
+      expiresInSeconds: Math.max(Math.ceil((job.expiresAt - Date.now()) / 1000), 0),
       waitMessage: "Your hall ticket is ready for download.",
     };
   }
 
   const position = globalState.queue.indexOf(userId) + 1;
+  const metrics = buildQueuedMetrics(position);
   return {
     status: "queued",
-    position,
+    ...metrics,
     waitMessage: "Server is busy. Please wait in the virtual queue.",
   };
 }

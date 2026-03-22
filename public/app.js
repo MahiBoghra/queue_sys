@@ -11,6 +11,7 @@ const facultySignupFields = document.getElementById("faculty-signup-fields");
 const requestBtn = document.getElementById("request-btn");
 const statusText = document.getElementById("status-text");
 const queuePosition = document.getElementById("queue-position");
+const queueDetails = document.getElementById("queue-details");
 const downloadBox = document.getElementById("download-box");
 const downloadJsonBtn = document.getElementById("download-json-btn");
 const hallticketExam = document.getElementById("hallticket-exam");
@@ -19,6 +20,10 @@ const sessionTimer = document.getElementById("session-timer");
 const studentGrid = document.getElementById("student-grid");
 const facultyGrid = document.getElementById("faculty-grid");
 const studentActions = document.getElementById("student-actions");
+const hallticketPreview = document.getElementById("hallticket-preview");
+const ticketStudentName = document.getElementById("ticket-student-name");
+const ticketRollNumber = document.getElementById("ticket-roll-number");
+const ticketDepartment = document.getElementById("ticket-department");
 const department = document.getElementById("department");
 const designation = document.getElementById("designation");
 const facultyMonitorBox = document.getElementById("faculty-monitor-box");
@@ -93,9 +98,82 @@ function updateSignupFieldsByRole() {
   });
 }
 
-function setStatus(message, position = null) {
+function formatDuration(seconds) {
+  const value = Math.max(Number(seconds) || 0, 0);
+  const mins = Math.floor(value / 60);
+  const secs = value % 60;
+
+  if (mins > 0) {
+    return `${mins}m ${String(secs).padStart(2, "0")}s`;
+  }
+
+  return `${secs}s`;
+}
+
+function setStatus(message, queueMeta = null) {
   statusText.textContent = message;
-  queuePosition.textContent = position ? `Queue Position: ${position}` : "";
+
+  if (!queueMeta || queueMeta.status !== "queued") {
+    queuePosition.textContent = "";
+    queueDetails.textContent = "";
+    return;
+  }
+
+  const position = Math.max(Number(queueMeta.position) || 0, 0);
+  const aheadCount = Math.max(Number(queueMeta.aheadCount) || 0, 0);
+  const queueLength = Math.max(Number(queueMeta.queueLength) || 0, 0);
+  const estimatedWaitSeconds = Math.max(Number(queueMeta.estimatedWaitSeconds) || 0, 0);
+  const nextTurnAt = queueMeta.nextTurnAt
+    ? new Date(Number(queueMeta.nextTurnAt)).toLocaleTimeString()
+    : "calculating...";
+
+  queuePosition.textContent = position > 0
+    ? `Queue number: ${position} (people ahead: ${aheadCount})`
+    : "Queue number is being calculated...";
+
+  queueDetails.textContent = `Total in queue: ${queueLength} | Estimated wait: ${formatDuration(estimatedWaitSeconds)} | Expected turn: ${nextTurnAt}`;
+}
+
+function stopQueuePolling() {
+  if (!pollTimer) return;
+  clearInterval(pollTimer);
+  pollTimer = null;
+}
+
+async function refreshQueueStatus() {
+  if (currentRole !== "student") return;
+
+  try {
+    const data = await api("/api/hallticket/status", { method: "GET" });
+
+    if (data.status === "ready") {
+      stopQueuePolling();
+      setStatus("Your turn has come. Hall ticket is ready for download.");
+      showDownloadModal(data.hallticket || { examName: "Final Semester Examination 2026" });
+      return;
+    }
+
+    if (data.status === "queued") {
+      setStatus(data.waitMessage || "Please wait in queue.", data);
+      return;
+    }
+
+    if (data.status === "expired") {
+      stopQueuePolling();
+      setStatus(data.waitMessage || "Download window expired. Request again.");
+      return;
+    }
+
+    setStatus(data.waitMessage || "No active request yet.");
+  } catch (error) {
+    setStatus(error.message || "Unable to fetch queue status.");
+  }
+}
+
+function startQueuePolling() {
+  stopQueuePolling();
+  refreshQueueStatus();
+  pollTimer = setInterval(refreshQueueStatus, 3000);
 }
 
 function showDownload(hallticket) {
@@ -143,10 +221,36 @@ function renderMonitorRows(rows) {
   });
 }
 
+function deriveDepartmentFromCourse(course) {
+  if (!course) return "Computer Science";
+
+  const normalized = String(course).trim();
+  if (!normalized) return "Computer Science";
+
+  if (normalized.includes(" ")) {
+    return normalized;
+  }
+
+  if (normalized.toUpperCase().includes("CSE")) {
+    return "Computer Science and Engineering";
+  }
+
+  return normalized;
+}
+
+function fillHallticketPreview(data) {
+  ticketStudentName.textContent = data.user?.name || "N/A";
+  ticketRollNumber.textContent = data.user?.rollNumber || data.user?.identifier || "N/A";
+  ticketDepartment.textContent = deriveDepartmentFromCourse(data.dashboardInfo?.course);
+}
+
 async function refreshFacultyMonitor() {
   try {
     const monitorData = await api("/api/faculty/queue-monitor", { method: "GET" });
-    monitorMeta.textContent = `Queue length: ${monitorData.queueLength} | Refreshed: ${new Date(monitorData.refreshedAt).toLocaleTimeString()}`;
+    const waitingCount = Number(monitorData.waitingCount ?? monitorData.queueLength ?? 0);
+    const readyCount = Number(monitorData.readyCount ?? 0);
+    const activeRequests = Number(monitorData.activeRequests ?? waitingCount + readyCount);
+    monitorMeta.textContent = `Waiting: ${waitingCount} | Ready: ${readyCount} | Active requests: ${activeRequests} | Refreshed: ${new Date(monitorData.refreshedAt).toLocaleTimeString()}`;
     renderMonitorRows(monitorData.rows || []);
   } catch (error) {
     monitorMeta.textContent = error.message;
@@ -163,6 +267,7 @@ function switchToDashboard(data) {
   if (currentRole === "faculty") {
     studentGrid.classList.add("hidden");
     studentActions.classList.add("hidden");
+    hallticketPreview.classList.add("hidden");
     facultyGrid.classList.remove("hidden");
     facultyMonitorBox.classList.remove("hidden");
     department.textContent = data.dashboardInfo.department || "N/A";
@@ -176,11 +281,14 @@ function switchToDashboard(data) {
     facultyGrid.classList.add("hidden");
     studentGrid.classList.remove("hidden");
     studentActions.classList.remove("hidden");
+    hallticketPreview.classList.remove("hidden");
     document.getElementById("course").textContent = data.dashboardInfo.course;
     document.getElementById("semester").textContent = data.dashboardInfo.semester;
     document.getElementById("examDate").textContent = data.dashboardInfo.examDate;
     document.getElementById("center").textContent = data.dashboardInfo.center;
+    fillHallticketPreview(data);
     setStatus("No active request yet.");
+    refreshQueueStatus();
     currentUserData = {
       name: data.user.name,
       ...data.dashboardInfo
@@ -198,10 +306,7 @@ function switchToLogin() {
   hideDownload();
   setStatus("No active request yet.");
   clearInterval(sessionCountdown);
-  if (pollTimer) {
-    clearInterval(pollTimer);
-    pollTimer = null;
-  }
+  stopQueuePolling();
   if (realtimeUnsubscribe) {
     realtimeUnsubscribe();
     realtimeUnsubscribe = null;
@@ -344,13 +449,15 @@ requestBtn.addEventListener("click", async () => {
     const data = await api("/api/hallticket/request", { method: "POST", body: "{}" });
 
     if (data.status === "ready") {
+      stopQueuePolling();
       setStatus(data.waitMessage || "Hall ticket ready.");
       showDownloadModal(data.hallticket);
       return;
     }
 
     hideDownload();
-    setStatus(data.waitMessage, "Your ticket is in PENDING/ACTIVE state.");
+    setStatus(data.waitMessage, data);
+    startQueuePolling();
 
     if (appwriteClient && appwriteConfig && data.docId) {
       if (realtimeUnsubscribe) realtimeUnsubscribe();
@@ -362,16 +469,17 @@ requestBtn.addEventListener("click", async () => {
         if (response.events.includes("databases.*.collections.*.documents.*.update")) {
             const updated = response.payload;
             if (updated.status === "DONE" || updated.status === "READY") {
+                stopQueuePolling();
                 setStatus("Hall ticket ready.");
                 showDownloadModal(updated);
                 if (realtimeUnsubscribe) { realtimeUnsubscribe(); realtimeUnsubscribe = null; }
             } else {
-                setStatus(`Status updated: ${updated.status}`);
+                refreshQueueStatus();
             }
         }
       });
     } else {
-      setStatus("Realtime not configured. Cannot subscribe to updates.");
+      setStatus("Realtime not configured. Queue status will auto-refresh every 3 seconds.", data);
     }
   } catch (error) {
     setStatus(error.message);
@@ -404,6 +512,7 @@ downloadJsonBtn.addEventListener("click", async () => {
     });
 
     setStatus("Hall ticket JSON downloaded and marked as completed.");
+    stopQueuePolling();
   } catch (error) {
     setStatus(error.message);
   }

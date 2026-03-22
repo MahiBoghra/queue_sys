@@ -1,6 +1,7 @@
-import { getHallticket, getQueueConfig, getActiveQueueCount, updateHallticketQueueStatus } from "../_lib/appwrite.js";
+import { getHallticket, getStudentHallticketData } from "../_lib/appwrite.js";
 import { parseCookies, sendJson, onlyPost } from "../_lib/http.js";
 import { verifySessionToken } from "../_lib/session.js";
+import { requestSlot } from "../_lib/queueEngine.js";
 
 export default async function handler(req, res) {
   if (!onlyPost(req, res)) return;
@@ -19,44 +20,47 @@ export default async function handler(req, res) {
       });
     }
 
-    const hallticket = await getHallticket(session.userId);
+    const existingHallticket = await getHallticket(session.userId);
+
+    let hallticket = existingHallticket;
     if (!hallticket) {
-      return sendJson(res, 404, { error: "Hall ticket not found for this user" });
+      const studentData = await getStudentHallticketData(session.userId);
+      if (!studentData) {
+        return sendJson(res, 404, { error: "Student record not found" });
+      }
+
+      hallticket = {
+        hallticketId: `virtual-${session.userId}`,
+        examName: "Final Semester Examination 2026",
+        pdfUrl: "",
+        isDownloaded: false,
+      };
     }
 
-    if (hallticket.status === "DONE" || hallticket.status === "READY") {
+    const queueResult = requestSlot(session.userId, hallticket);
+
+    if (queueResult.status === "ready") {
       return sendJson(res, 200, {
         status: "ready",
-        waitMessage: "Your hall ticket is ready.",
-        hallticket,
-        docId: hallticket.hallticketId
+        waitMessage: queueResult.waitMessage,
+        hallticket: queueResult.hallticket,
+        docId: queueResult.hallticket?.hallticketId,
+        expiresAt: queueResult.expiresAt,
       });
     }
-
-    if (hallticket.status === "ACTIVE" || hallticket.status === "PENDING") {
-      return sendJson(res, 200, {
-        status: "queued",
-        queueStatus: hallticket.status,
-        waitMessage: "Server is processing. Please wait in the virtual queue.",
-        docId: hallticket.hallticketId,
-        hallticket
-      });
-    }
-
-    const config = await getQueueConfig();
-    const activeCount = await getActiveQueueCount();
-    const isSlotAvailable = activeCount < config.queueLimit;
-    const newStatus = isSlotAvailable ? "ACTIVE" : "PENDING";
-    const queuePosition = Date.now(); // Simple chronological sorting
-
-    await updateHallticketQueueStatus(hallticket.hallticketId, newStatus, queuePosition);
 
     return sendJson(res, 200, {
-        status: "queued",
-        queueStatus: newStatus,
-        docId: hallticket.hallticketId,
-        hallticket,
-        waitMessage: "Server is processing. Please wait in the virtual queue.",
+      status: "queued",
+      queueStatus: "PENDING",
+      position: queueResult.position,
+      aheadCount: queueResult.aheadCount,
+      queueLength: queueResult.queueLength,
+      processingRatePerSecond: queueResult.processingRatePerSecond,
+      estimatedWaitSeconds: queueResult.estimatedWaitSeconds,
+      nextTurnAt: queueResult.nextTurnAt,
+      waitMessage: queueResult.waitMessage,
+      docId: hallticket.hallticketId,
+      hallticket,
     });
 
   } catch (error) {

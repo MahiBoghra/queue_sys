@@ -1,4 +1,4 @@
-import { parseCookies, sendJson, onlyPost, onlyGet } from "../_lib/http.js";
+import { parseCookies, sendJson } from "../_lib/http.js";
 import { verifySessionToken } from "../_lib/session.js";
 import { setQueueConfig, getQueueConfig } from "../_lib/appwrite.js";
 
@@ -17,12 +17,12 @@ export default async function handler(req, res) {
     }
 
     if (req.method === "POST") {
-      const body = await parseBody(req);
-      if (!body.queueLimit || typeof body.queueLimit !== "number") {
+      const queueLimit = await extractQueueLimit(req);
+      if (!Number.isFinite(queueLimit) || queueLimit < 1) {
         return sendJson(res, 400, { error: "Invalid queueLimit. Must be a number." });
       }
 
-      const updated = await setQueueConfig(body.queueLimit);
+      const updated = await setQueueConfig(Math.floor(queueLimit));
       return sendJson(res, 200, updated);
     }
 
@@ -32,12 +32,23 @@ export default async function handler(req, res) {
   }
 }
 
-async function parseBody(req) {
+async function extractQueueLimit(req) {
+  if (req.body && typeof req.body === "object") {
+    return Number(req.body.queueLimit);
+  }
+
+  const raw = await readRawBody(req);
+  return Number(raw?.queueLimit);
+}
+
+async function readRawBody(req) {
   return new Promise((resolve) => {
     let body = "";
+
     req.on("data", (chunk) => {
       body += chunk.toString();
     });
+
     req.on("end", () => {
       try {
         resolve(JSON.parse(body || "{}"));
@@ -45,5 +56,7 @@ async function parseBody(req) {
         resolve({});
       }
     });
+
+    req.on("error", () => resolve({}));
   });
 }

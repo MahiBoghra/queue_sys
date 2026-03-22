@@ -26,11 +26,13 @@ export default async function handler(req, res) {
       const queueMeta = getQueueMetaForUser(student.userId);
       const hallticketMeta = hallticketMap.get(student.userId) || { isDownloaded: false };
 
-      let status = "Waiting";
+      let status = "Idle";
       if (hallticketMeta.isDownloaded) {
         status = "Downloaded";
       } else if (queueMeta.status === "ready") {
         status = "Ready";
+      } else if (queueMeta.status === "waiting") {
+        status = "Waiting";
       }
 
       return {
@@ -43,8 +45,16 @@ export default async function handler(req, res) {
       };
     });
 
+    const waitingCount = rows.filter((row) => row.status === "Waiting").length;
+    const readyCount = rows.filter((row) => row.status === "Ready").length;
+    const activeRequests = waitingCount + readyCount;
+
     return sendJson(res, 200, {
-      queueLength: queueSnapshot.queue.length,
+      queueLength: waitingCount,
+      waitingCount,
+      readyCount,
+      activeRequests,
+      queueSnapshotLength: queueSnapshot.queue.length,
       rows,
       refreshedAt: new Date().toISOString(),
     });

@@ -20,6 +20,12 @@ import {
   markMockHallticketDownloaded,
 } from "./mockStore.js";
 
+const queueConfigState = globalThis.__QUEUE_CONFIG_STATE__ || {
+  queueLimit: 5,
+};
+
+globalThis.__QUEUE_CONFIG_STATE__ = queueConfigState;
+
 function hasAppwriteConfig() {
   return Boolean(
     APPWRITE_ENDPOINT &&
@@ -238,44 +244,73 @@ export async function getHallticket(userId) {
 }
 
 export async function getQueueConfig() {
-  const mode = ensureUsersDataMode();
-  if (mode === "mock") return { queueLimit: 5 };
+  try {
+    const mode = ensureUsersDataMode();
+    if (mode === "mock") {
+      return { queueLimit: queueConfigState.queueLimit };
+    }
 
-  if (!isHallticketConfigPresent()) return { queueLimit: 5 };
+    if (!isHallticketConfigPresent()) {
+      return { queueLimit: queueConfigState.queueLimit };
+    }
 
-  const databases = createDatabasesClient();
-  const response = await databases.listDocuments(
-    APPWRITE_DATABASE_ID,
-    APPWRITE_CONFIG_COLLECTION_ID,
-    [Query.limit(1)]
-  );
+    const databases = createDatabasesClient();
+    const response = await databases.listDocuments(
+      APPWRITE_DATABASE_ID,
+      APPWRITE_CONFIG_COLLECTION_ID,
+      [Query.limit(1)],
+    );
 
-  if (!response.documents.length) {
-    // Return default if not found
-    return { queueLimit: 5 };
+    if (!response.documents.length) {
+      return { queueLimit: queueConfigState.queueLimit };
+    }
+
+    const limit = Number(response.documents[0].queueLimit) || queueConfigState.queueLimit;
+    queueConfigState.queueLimit = limit;
+
+    return { queueLimit: limit, docId: response.documents[0].$id };
+  } catch {
+    return { queueLimit: queueConfigState.queueLimit };
   }
-  return { queueLimit: response.documents[0].queueLimit || 5, docId: response.documents[0].$id };
 }
 
 export async function setQueueConfig(limit) {
-  const mode = ensureUsersDataMode();
-  if (mode === "mock") return { queueLimit: limit };
+  const normalizedLimit = Number(limit);
+  queueConfigState.queueLimit = normalizedLimit;
 
-  if (!isHallticketConfigPresent()) return { queueLimit: limit };
+  try {
+    const mode = ensureUsersDataMode();
+    if (mode === "mock") return { queueLimit: normalizedLimit };
 
-  const databases = createDatabasesClient();
-  const response = await databases.listDocuments(
-    APPWRITE_DATABASE_ID,
-    APPWRITE_CONFIG_COLLECTION_ID,
-    [Query.limit(1)]
-  );
+    if (!isHallticketConfigPresent()) return { queueLimit: normalizedLimit };
 
-  if (!response.documents.length) {
-    await databases.createDocument(APPWRITE_DATABASE_ID, APPWRITE_CONFIG_COLLECTION_ID, ID.unique(), { queueLimit: limit });
-  } else {
-    await databases.updateDocument(APPWRITE_DATABASE_ID, APPWRITE_CONFIG_COLLECTION_ID, response.documents[0].$id, { queueLimit: limit });
+    const databases = createDatabasesClient();
+    const response = await databases.listDocuments(
+      APPWRITE_DATABASE_ID,
+      APPWRITE_CONFIG_COLLECTION_ID,
+      [Query.limit(1)],
+    );
+
+    if (!response.documents.length) {
+      await databases.createDocument(
+        APPWRITE_DATABASE_ID,
+        APPWRITE_CONFIG_COLLECTION_ID,
+        ID.unique(),
+        { queueLimit: normalizedLimit },
+      );
+    } else {
+      await databases.updateDocument(
+        APPWRITE_DATABASE_ID,
+        APPWRITE_CONFIG_COLLECTION_ID,
+        response.documents[0].$id,
+        { queueLimit: normalizedLimit },
+      );
+    }
+
+    return { queueLimit: normalizedLimit };
+  } catch {
+    return { queueLimit: normalizedLimit };
   }
-  return { queueLimit: limit };
 }
 
 export async function getActiveQueueCount() {

@@ -1,4 +1,4 @@
-import { markHallticketDownloaded } from "../_lib/appwrite.js";
+import { markHallticketDownloaded, getStudentHallticketData } from "../_lib/appwrite.js";
 import { parseCookies, sendJson, onlyPost } from "../_lib/http.js";
 import { verifySessionToken } from "../_lib/session.js";
 
@@ -19,7 +19,15 @@ export default async function handler(req, res) {
 
     const updated = await markHallticketDownloaded(session.userId);
     if (!updated) {
-      return sendJson(res, 404, { error: "Hall ticket not found for this user" });
+      const studentData = await getStudentHallticketData(session.userId);
+      if (!studentData) {
+        return sendJson(res, 404, { error: "Student record not found" });
+      }
+
+      return sendJson(res, 200, {
+        message: "Download completed (no persistent hall ticket record to update)",
+        isDownloaded: true,
+      });
     }
 
     return sendJson(res, 200, { message: "Download status updated", isDownloaded: true });
