@@ -1,7 +1,12 @@
-import { getHallticket, getStudentHallticketData } from "../_lib/appwrite.js";
+import {
+  ensurePersistentHallticket,
+  getPersistentQueueStatus,
+  getStudentHallticketData,
+  processPersistentHallticketQueue,
+  updateHallticketQueueStatus,
+} from "../_lib/appwrite.js";
 import { parseCookies, sendJson, onlyPost } from "../_lib/http.js";
 import { verifySessionToken } from "../_lib/session.js";
-import { requestSlot } from "../_lib/queueEngine.js";
 
 export default async function handler(req, res) {
   if (!onlyPost(req, res)) return;
@@ -20,7 +25,7 @@ export default async function handler(req, res) {
       });
     }
 
-    const existingHallticket = await getHallticket(session.userId);
+    const existingHallticket = await ensurePersistentHallticket(session.userId);
 
     let hallticket = existingHallticket;
     if (!hallticket) {
@@ -30,6 +35,7 @@ export default async function handler(req, res) {
       }
 
       hallticket = {
+        documentId: null,
         hallticketId: `virtual-${session.userId}`,
         examName: "Final Semester Examination 2026",
         pdfUrl: "",
@@ -37,14 +43,27 @@ export default async function handler(req, res) {
       };
     }
 
-    const queueResult = requestSlot(session.userId, hallticket);
+    if (hallticket.documentId) {
+      if (hallticket.status !== "READY" || hallticket.isDownloaded) {
+        await updateHallticketQueueStatus(
+          hallticket.documentId,
+          "PENDING",
+          Date.now(),
+          { isDownloaded: false },
+        );
+      }
+
+      await processPersistentHallticketQueue();
+    }
+
+    const queueResult = await getPersistentQueueStatus(session.userId);
 
     if (queueResult.status === "ready") {
       return sendJson(res, 200, {
         status: "ready",
         waitMessage: queueResult.waitMessage,
         hallticket: queueResult.hallticket,
-        docId: queueResult.hallticket?.hallticketId,
+        docId: queueResult.hallticket?.documentId || queueResult.hallticket?.hallticketId,
         expiresAt: queueResult.expiresAt,
       });
     }
@@ -56,10 +75,11 @@ export default async function handler(req, res) {
       aheadCount: queueResult.aheadCount,
       queueLength: queueResult.queueLength,
       processingRatePerSecond: queueResult.processingRatePerSecond,
+      preparationWaitSeconds: queueResult.preparationWaitSeconds,
       estimatedWaitSeconds: queueResult.estimatedWaitSeconds,
       nextTurnAt: queueResult.nextTurnAt,
       waitMessage: queueResult.waitMessage,
-      docId: hallticket.hallticketId,
+      docId: queueResult.hallticket?.documentId || hallticket.documentId || hallticket.hallticketId,
       hallticket,
     });
 

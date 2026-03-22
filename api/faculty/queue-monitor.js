@@ -1,7 +1,6 @@
 import { getHallticketStatusMap, listStudentsForMonitor } from "../_lib/appwrite.js";
 import { parseCookies, sendJson, onlyGet } from "../_lib/http.js";
 import { verifySessionToken } from "../_lib/session.js";
-import { getQueueMetaForUser, getQueueSnapshot } from "../_lib/queueEngine.js";
 
 export default async function handler(req, res) {
   if (!onlyGet(req, res)) return;
@@ -20,19 +19,28 @@ export default async function handler(req, res) {
 
     const students = await listStudentsForMonitor();
     const hallticketMap = await getHallticketStatusMap();
-    const queueSnapshot = getQueueSnapshot();
+    const waitingOrder = Array.from(hallticketMap.entries())
+      .filter(([, value]) => value.status === "PENDING")
+      .sort((a, b) => (Number(a[1].queuePosition) || 0) - (Number(b[1].queuePosition) || 0));
+
+    const waitingPositionMap = new Map(
+      waitingOrder.map(([userId], index) => [userId, index + 1]),
+    );
 
     const rows = students.map((student) => {
-      const queueMeta = getQueueMetaForUser(student.userId);
-      const hallticketMeta = hallticketMap.get(student.userId) || { isDownloaded: false };
-      const isDownloaded = Boolean(hallticketMeta.isDownloaded) || queueMeta.status === "downloaded";
+      const hallticketMeta = hallticketMap.get(student.userId) || {
+        isDownloaded: false,
+        status: "IDLE",
+        queuePosition: 0,
+      };
+      const isDownloaded = Boolean(hallticketMeta.isDownloaded) || hallticketMeta.status === "DOWNLOADED";
 
       let status = "Idle";
       if (isDownloaded) {
         status = "Downloaded";
-      } else if (queueMeta.status === "ready") {
+      } else if (hallticketMeta.status === "READY") {
         status = "Ready";
-      } else if (queueMeta.status === "waiting") {
+      } else if (hallticketMeta.status === "PENDING") {
         status = "Waiting";
       }
 
@@ -41,7 +49,7 @@ export default async function handler(req, res) {
         name: student.name,
         rollNumber: student.rollNumber,
         status,
-        queuePosition: status === "Waiting" ? queueMeta.queuePosition : 0,
+        queuePosition: status === "Waiting" ? waitingPositionMap.get(student.userId) || 0 : 0,
         isDownloaded,
       };
     });
@@ -55,7 +63,7 @@ export default async function handler(req, res) {
       waitingCount,
       readyCount,
       activeRequests,
-      queueSnapshotLength: queueSnapshot.queue.length,
+      queueSnapshotLength: waitingCount,
       rows,
       refreshedAt: new Date().toISOString(),
     });

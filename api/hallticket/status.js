@@ -1,6 +1,6 @@
 import { parseCookies, sendJson, onlyGet } from "../_lib/http.js";
 import { verifySessionToken } from "../_lib/session.js";
-import { getStatus } from "../_lib/queueEngine.js";
+import { getPersistentQueueStatus, processPersistentHallticketQueue } from "../_lib/appwrite.js";
 
 export default async function handler(req, res) {
   if (!onlyGet(req, res)) return;
@@ -19,7 +19,8 @@ export default async function handler(req, res) {
       });
     }
 
-    const status = getStatus(session.userId);
+    await processPersistentHallticketQueue();
+    const status = await getPersistentQueueStatus(session.userId);
     return sendJson(res, 200, status);
   } catch (error) {
     return sendJson(res, 500, { error: "Status check failed", details: error.message });

@@ -1,12 +1,18 @@
 import { Client, Databases, ID, Query } from "appwrite";
+import fs from "fs";
+import os from "os";
+import path from "path";
 import {
   APPWRITE_API_KEY,
   APPWRITE_DATABASE_ID,
+  DOWNLOAD_WINDOW_SECONDS,
+  HALLTICKET_PREPARE_SECONDS,
   APPWRITE_ENDPOINT,
   APPWRITE_HALLTICKETS_COLLECTION_ID,
   APPWRITE_PROJECT_ID,
   APPWRITE_USERS_COLLECTION_ID,
   APPWRITE_CONFIG_COLLECTION_ID,
+  QUEUE_RATE_LIMIT_PER_SECOND,
 } from "./config.js";
 import {
   createMockUser,
@@ -21,10 +27,46 @@ import {
 } from "./mockStore.js";
 
 const queueConfigState = globalThis.__QUEUE_CONFIG_STATE__ || {
-  queueLimit: 5,
+  queueLimit: Math.max(Number(QUEUE_RATE_LIMIT_PER_SECOND) || 1, 1),
 };
 
 globalThis.__QUEUE_CONFIG_STATE__ = queueConfigState;
+
+const RUNTIME_CONFIG_FILE = path.join(os.tmpdir(), "queue_sys_runtime_config.json");
+
+function syncQueueConfigFromDisk() {
+  try {
+    if (!fs.existsSync(RUNTIME_CONFIG_FILE)) return;
+
+    const raw = fs.readFileSync(RUNTIME_CONFIG_FILE, "utf8");
+    if (!raw) return;
+
+    const parsed = JSON.parse(raw);
+    const limit = Number(parsed.queueLimit);
+    if (Number.isFinite(limit) && limit >= 1) {
+      queueConfigState.queueLimit = Math.floor(limit);
+    }
+  } catch {
+    // Ignore runtime config read failures.
+  }
+}
+
+function persistQueueConfigToDisk() {
+  try {
+    fs.writeFileSync(
+      RUNTIME_CONFIG_FILE,
+      JSON.stringify({ queueLimit: queueConfigState.queueLimit }),
+      "utf8",
+    );
+  } catch {
+    // Ignore runtime config write failures.
+  }
+}
+
+export function getQueueLimitRuntime() {
+  syncQueueConfigFromDisk();
+  return Math.max(Number(queueConfigState.queueLimit) || 1, 1);
+}
 
 function hasAppwriteConfig() {
   return Boolean(
@@ -234,6 +276,7 @@ export async function getHallticket(userId) {
   const hallticket = response.documents[0];
 
   return {
+    documentId: hallticket.$id,
     hallticketId: hallticket.hallticketId || hallticket.$id,
     examName: hallticket.examName,
     pdfUrl: hallticket.pdfUrl,
@@ -244,6 +287,8 @@ export async function getHallticket(userId) {
 }
 
 export async function getQueueConfig() {
+  syncQueueConfigFromDisk();
+
   try {
     const mode = ensureUsersDataMode();
     if (mode === "mock") {
@@ -267,22 +312,25 @@ export async function getQueueConfig() {
 
     const limit = Number(response.documents[0].queueLimit) || queueConfigState.queueLimit;
     queueConfigState.queueLimit = limit;
+    persistQueueConfigToDisk();
 
     return { queueLimit: limit, docId: response.documents[0].$id };
   } catch {
+    persistQueueConfigToDisk();
     return { queueLimit: queueConfigState.queueLimit };
   }
 }
 
 export async function setQueueConfig(limit) {
   const normalizedLimit = Number(limit);
-  queueConfigState.queueLimit = normalizedLimit;
+  queueConfigState.queueLimit = Math.max(Math.floor(normalizedLimit), 1);
+  persistQueueConfigToDisk();
 
   try {
     const mode = ensureUsersDataMode();
-    if (mode === "mock") return { queueLimit: normalizedLimit };
+    if (mode === "mock") return { queueLimit: queueConfigState.queueLimit };
 
-    if (!isHallticketConfigPresent()) return { queueLimit: normalizedLimit };
+    if (!isHallticketConfigPresent()) return { queueLimit: queueConfigState.queueLimit };
 
     const databases = createDatabasesClient();
     const response = await databases.listDocuments(
@@ -296,20 +344,20 @@ export async function setQueueConfig(limit) {
         APPWRITE_DATABASE_ID,
         APPWRITE_CONFIG_COLLECTION_ID,
         ID.unique(),
-        { queueLimit: normalizedLimit },
+        { queueLimit: queueConfigState.queueLimit },
       );
     } else {
       await databases.updateDocument(
         APPWRITE_DATABASE_ID,
         APPWRITE_CONFIG_COLLECTION_ID,
         response.documents[0].$id,
-        { queueLimit: normalizedLimit },
+        { queueLimit: queueConfigState.queueLimit },
       );
     }
 
-    return { queueLimit: normalizedLimit };
+    return { queueLimit: queueConfigState.queueLimit };
   } catch {
-    return { queueLimit: normalizedLimit };
+    return { queueLimit: queueConfigState.queueLimit };
   }
 }
 
@@ -326,13 +374,13 @@ export async function getActiveQueueCount() {
   return response.total;
 }
 
-export async function updateHallticketQueueStatus(docId, status, queuePosition = 0) {
+export async function updateHallticketQueueStatus(docId, status, queuePosition = 0, extraData = {}) {
   const databases = createDatabasesClient();
   return databases.updateDocument(
     APPWRITE_DATABASE_ID,
     APPWRITE_HALLTICKETS_COLLECTION_ID,
     docId,
-    { status, queuePosition }
+    { status, queuePosition, ...extraData },
   );
 }
 
@@ -387,7 +435,11 @@ export async function markHallticketDownloaded(userId) {
     APPWRITE_DATABASE_ID,
     APPWRITE_HALLTICKETS_COLLECTION_ID,
     document.$id,
-    { isDownloaded: true },
+    {
+      isDownloaded: true,
+      status: "DOWNLOADED",
+      queuePosition: 0,
+    },
   );
 }
 
@@ -438,9 +490,177 @@ export async function getHallticketStatusMap() {
   response.documents.forEach((doc) => {
     statusMap.set(doc.userId, {
       isDownloaded: Boolean(doc.isDownloaded),
+      status: doc.status || "IDLE",
+      queuePosition: Number(doc.queuePosition) || 0,
+      examName: doc.examName || "Final Semester Examination 2026",
       hallticketId: doc.hallticketId || doc.$id,
     });
   });
 
   return statusMap;
+}
+
+export async function ensurePersistentHallticket(userId) {
+  const mode = ensureUsersDataMode();
+  if (mode === "mock") {
+    return getMockHallticket(userId);
+  }
+
+  if (!isHallticketConfigPresent()) {
+    return null;
+  }
+
+  const existing = await getHallticket(userId);
+  if (existing) {
+    return existing;
+  }
+
+  const databases = createDatabasesClient();
+  const hallticketId = `ht-${ID.unique()}`;
+  const created = await databases.createDocument(
+    APPWRITE_DATABASE_ID,
+    APPWRITE_HALLTICKETS_COLLECTION_ID,
+    ID.unique(),
+    {
+      userId,
+      hallticketId,
+      examName: "Final Semester Examination 2026",
+      pdfUrl: "",
+      isDownloaded: false,
+      status: "IDLE",
+      queuePosition: 0,
+    },
+  );
+
+  return {
+    documentId: created.$id,
+    hallticketId: created.hallticketId || created.$id,
+    examName: created.examName,
+    pdfUrl: created.pdfUrl,
+    isDownloaded: Boolean(created.isDownloaded),
+    status: created.status,
+    queuePosition: Number(created.queuePosition) || 0,
+  };
+}
+
+export async function processPersistentHallticketQueue() {
+  const mode = ensureUsersDataMode();
+  if (mode === "mock" || !isHallticketConfigPresent()) {
+    return;
+  }
+
+  const databases = createDatabasesClient();
+  const now = Date.now();
+  const prepareMs = HALLTICKET_PREPARE_SECONDS * 1000;
+  const { queueLimit } = await getQueueConfig();
+  const normalizedLimit = Math.max(Number(queueLimit) || 1, 1);
+
+  const readyResponse = await databases.listDocuments(
+    APPWRITE_DATABASE_ID,
+    APPWRITE_HALLTICKETS_COLLECTION_ID,
+    [Query.equal("status", "READY"), Query.equal("isDownloaded", false), Query.limit(1000)],
+  );
+
+  const pendingResponse = await databases.listDocuments(
+    APPWRITE_DATABASE_ID,
+    APPWRITE_HALLTICKETS_COLLECTION_ID,
+    [Query.equal("status", "PENDING"), Query.orderAsc("queuePosition"), Query.limit(1000)],
+  );
+
+  const availableSlots = Math.max(normalizedLimit - readyResponse.total, 0);
+  if (availableSlots <= 0) {
+    return;
+  }
+
+  const eligible = pendingResponse.documents.filter((doc) => {
+    const requestedAt = Number(doc.queuePosition) || 0;
+    return requestedAt > 0 && now - requestedAt >= prepareMs;
+  });
+
+  const toPromote = eligible.slice(0, availableSlots);
+  await Promise.all(
+    toPromote.map((doc) =>
+      databases.updateDocument(
+        APPWRITE_DATABASE_ID,
+        APPWRITE_HALLTICKETS_COLLECTION_ID,
+        doc.$id,
+        {
+          status: "READY",
+        },
+      ),
+    ),
+  );
+}
+
+export async function getPersistentQueueStatus(userId) {
+  const mode = ensureUsersDataMode();
+  if (mode === "mock") {
+    return { status: "idle", waitMessage: "No active request. Click generate hall ticket." };
+  }
+
+  if (!isHallticketConfigPresent()) {
+    return { status: "idle", waitMessage: "Queue collection is not configured." };
+  }
+
+  await processPersistentHallticketQueue();
+
+  const hallticket = await getHallticket(userId);
+  if (!hallticket) {
+    return { status: "idle", waitMessage: "No active request. Click generate hall ticket." };
+  }
+
+  if (hallticket.isDownloaded || hallticket.status === "DOWNLOADED") {
+    return {
+      status: "downloaded",
+      hallticket,
+      waitMessage: "Hall ticket already downloaded.",
+    };
+  }
+
+  if (hallticket.status === "READY") {
+    return {
+      status: "ready",
+      hallticket,
+      waitMessage: "Your hall ticket is ready for download.",
+    };
+  }
+
+  if (hallticket.status === "PENDING") {
+    const databases = createDatabasesClient();
+    const pendingResponse = await databases.listDocuments(
+      APPWRITE_DATABASE_ID,
+      APPWRITE_HALLTICKETS_COLLECTION_ID,
+      [Query.equal("status", "PENDING"), Query.orderAsc("queuePosition"), Query.limit(1000)],
+    );
+
+    const queue = pendingResponse.documents;
+    const index = queue.findIndex((doc) => doc.userId === userId);
+    const position = index >= 0 ? index + 1 : 1;
+    const aheadCount = Math.max(position - 1, 0);
+    const requestedAt = Number(hallticket.queuePosition) || Date.now();
+    const prepareMs = HALLTICKET_PREPARE_SECONDS * 1000;
+    const preparationWaitSeconds = Math.max(Math.ceil((requestedAt + prepareMs - Date.now()) / 1000), 0);
+    const { queueLimit } = await getQueueConfig();
+    const processingRatePerSecond = Math.max(Number(queueLimit) || 1, 1);
+    const throughputWaitSeconds = Math.ceil(position / processingRatePerSecond);
+    const estimatedWaitSeconds = Math.max(preparationWaitSeconds, throughputWaitSeconds);
+
+    return {
+      status: "queued",
+      position,
+      aheadCount,
+      queueLength: queue.length,
+      processingRatePerSecond,
+      preparationWaitSeconds,
+      estimatedWaitSeconds,
+      nextTurnAt: Date.now() + estimatedWaitSeconds * 1000,
+      hallticket,
+      waitMessage: "Server is busy. Please wait in the virtual queue.",
+    };
+  }
+
+  return {
+    status: "idle",
+    waitMessage: "No active request. Click generate hall ticket.",
+  };
 }

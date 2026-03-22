@@ -1,8 +1,8 @@
 import {
   DOWNLOAD_WINDOW_SECONDS,
   HALLTICKET_PREPARE_SECONDS,
-  QUEUE_RATE_LIMIT_PER_SECOND,
 } from "./config.js";
+import { getQueueLimitRuntime } from "./appwrite.js";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -99,6 +99,10 @@ function rotateWindowIfNeeded() {
   }
 }
 
+function getProcessingRate() {
+  return Math.max(Number(getQueueLimitRuntime()) || 1, 1);
+}
+
 function markReady(userId, hallticket) {
   const expiresAt = Date.now() + DOWNLOAD_WINDOW_SECONDS * 1000;
   const current = globalState.jobByUserId.get(userId) || {};
@@ -135,10 +139,11 @@ export function markDownloaded(userId) {
 
 function processQueue() {
   rotateWindowIfNeeded();
+  const processingRate = getProcessingRate();
 
   while (
     globalState.queue.length > 0 &&
-    globalState.processedCount < QUEUE_RATE_LIMIT_PER_SECOND
+    globalState.processedCount < processingRate
   ) {
     const queuedUserId = globalState.queue[0];
     const job = globalState.jobByUserId.get(queuedUserId);
@@ -158,7 +163,7 @@ function processQueue() {
 
 function buildQueuedMetrics(position, eligibleAt = 0) {
   const safePosition = Math.max(Number(position) || 0, 0);
-  const safeRate = Math.max(QUEUE_RATE_LIMIT_PER_SECOND, 1);
+  const safeRate = getProcessingRate();
   const aheadCount = Math.max(safePosition - 1, 0);
   const throughputWaitSeconds = Math.ceil(safePosition / safeRate);
   const preparationWaitSeconds = Math.max(
