@@ -1,6 +1,6 @@
 import { parseCookies, sendJson, onlyGet } from "../_lib/http.js";
 import { verifySessionToken } from "../_lib/session.js";
-import { getPersistentQueueStatus, processPersistentHallticketQueue } from "../_lib/appwrite.js";
+import { getPersistentQueueStatus } from "../_lib/appwrite.js";
 
 export default async function handler(req, res) {
   if (!onlyGet(req, res)) return;
@@ -19,8 +19,9 @@ export default async function handler(req, res) {
       });
     }
 
-    await processPersistentHallticketQueue();
-    const status = await getPersistentQueueStatus(session.userId);
+    const hallticketUserId = session.rollNumber || session.identifier || session.userId;
+
+    const status = await getPersistentQueueStatus(hallticketUserId, { processQueue: false });
     return sendJson(res, 200, status);
   } catch (error) {
     return sendJson(res, 500, { error: "Status check failed", details: error.message });

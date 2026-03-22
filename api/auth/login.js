@@ -1,4 +1,4 @@
-import { authenticateUser } from "../_lib/appwrite.js";
+import { authenticateUser, syncHallticketSnapshotForStudent } from "../_lib/appwrite.js";
 import { sendJson, setCookie, onlyPost } from "../_lib/http.js";
 import { buildSessionToken, getSessionTtlSeconds } from "../_lib/session.js";
 
@@ -18,6 +18,16 @@ export default async function handler(req, res) {
     const user = await authenticateUser(normalizedRole, normalizedIdentifier, password);
     if (!user) {
       return sendJson(res, 401, { error: "Invalid credentials. Try again." });
+    }
+
+    if (user.role === "student") {
+      // Best-effort snapshot persistence so auth is never blocked by schema drift.
+      try {
+        const hallticketUserId = user.rollNumber || user.identifier || user.userId;
+        await syncHallticketSnapshotForStudent(user.userId, hallticketUserId);
+      } catch (snapshotError) {
+        console.warn("Hallticket snapshot sync skipped:", snapshotError?.message || snapshotError);
+      }
     }
 
     const token = buildSessionToken(user);

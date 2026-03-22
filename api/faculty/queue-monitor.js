@@ -1,4 +1,9 @@
-import { getHallticketStatusMap, listStudentsForMonitor } from "../_lib/appwrite.js";
+import {
+  getHallticketStatusMap,
+  listStudentsForMonitor,
+  processPersistentHallticketQueue,
+  recalculatePendingQueuePositions,
+} from "../_lib/appwrite.js";
 import { parseCookies, sendJson, onlyGet } from "../_lib/http.js";
 import { verifySessionToken } from "../_lib/session.js";
 
@@ -17,6 +22,9 @@ export default async function handler(req, res) {
       return sendJson(res, 403, { error: "Only faculty can access queue monitor" });
     }
 
+    await processPersistentHallticketQueue();
+    await recalculatePendingQueuePositions();
+
     const students = await listStudentsForMonitor();
     const hallticketMap = await getHallticketStatusMap();
     const waitingOrder = Array.from(hallticketMap.entries())
@@ -28,7 +36,8 @@ export default async function handler(req, res) {
     );
 
     const rows = students.map((student) => {
-      const hallticketMeta = hallticketMap.get(student.userId) || {
+      const hallticketUserId = student.rollNumber || student.userId;
+      const hallticketMeta = hallticketMap.get(hallticketUserId) || {
         isDownloaded: false,
         status: "IDLE",
         queuePosition: 0,
@@ -49,7 +58,7 @@ export default async function handler(req, res) {
         name: student.name,
         rollNumber: student.rollNumber,
         status,
-        queuePosition: status === "Waiting" ? waitingPositionMap.get(student.userId) || 0 : 0,
+        queuePosition: status === "Waiting" ? waitingPositionMap.get(hallticketUserId) || 0 : 0,
         isDownloaded,
       };
     });

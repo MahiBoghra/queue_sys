@@ -17,8 +17,10 @@ export default async function handler(req, res) {
       return sendJson(res, 403, { error: "Only students can download hall ticket JSON" });
     }
 
+    const hallticketUserId = session.rollNumber || session.identifier || session.userId;
+
     await processPersistentHallticketQueue();
-    const queueStatus = await getPersistentQueueStatus(session.userId);
+    const queueStatus = await getPersistentQueueStatus(hallticketUserId);
     if (queueStatus.status !== "ready" && queueStatus.status !== "downloaded") {
       return sendJson(res, 409, {
         error: "Hall ticket is not ready yet. Please wait in queue.",

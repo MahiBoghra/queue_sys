@@ -17,7 +17,9 @@ export default async function handler(req, res) {
       return sendJson(res, 403, { error: "Only students can update download status" });
     }
 
-    const updated = await markHallticketDownloaded(session.userId);
+    const hallticketUserId = session.rollNumber || session.identifier || session.userId;
+
+    const updated = await markHallticketDownloaded(hallticketUserId);
     if (!updated) {
       const studentData = await getStudentHallticketData(session.userId);
       if (!studentData) {

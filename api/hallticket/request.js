@@ -2,7 +2,6 @@ import {
   ensurePersistentHallticket,
   getPersistentQueueStatus,
   getStudentHallticketData,
-  processPersistentHallticketQueue,
   updateHallticketQueueStatus,
 } from "../_lib/appwrite.js";
 import { parseCookies, sendJson, onlyPost } from "../_lib/http.js";
@@ -25,7 +24,9 @@ export default async function handler(req, res) {
       });
     }
 
-    const existingHallticket = await ensurePersistentHallticket(session.userId);
+    const hallticketUserId = session.rollNumber || session.identifier || session.userId;
+
+    const existingHallticket = await ensurePersistentHallticket(hallticketUserId);
 
     let hallticket = existingHallticket;
     if (!hallticket) {
@@ -44,19 +45,23 @@ export default async function handler(req, res) {
     }
 
     if (hallticket.documentId) {
-      if (hallticket.status !== "READY" || hallticket.isDownloaded) {
+      const currentStatus = hallticket.status || "IDLE";
+      const shouldEnqueue =
+        currentStatus === "IDLE" ||
+        currentStatus === "DOWNLOADED" ||
+        hallticket.isDownloaded;
+
+      if (shouldEnqueue) {
         await updateHallticketQueueStatus(
           hallticket.documentId,
           "PENDING",
-          Date.now(),
-          { isDownloaded: false },
+          0,
+          { isDownloaded: false, requestedAt: Date.now() },
         );
       }
-
-      await processPersistentHallticketQueue();
     }
 
-    const queueResult = await getPersistentQueueStatus(session.userId);
+    const queueResult = await getPersistentQueueStatus(hallticketUserId);
 
     if (queueResult.status === "ready") {
       return sendJson(res, 200, {
@@ -80,7 +85,7 @@ export default async function handler(req, res) {
       nextTurnAt: queueResult.nextTurnAt,
       waitMessage: queueResult.waitMessage,
       docId: queueResult.hallticket?.documentId || hallticket.documentId || hallticket.hallticketId,
-      hallticket,
+      hallticket: queueResult.hallticket || hallticket,
     });
 
   } catch (error) {
@@ -98,7 +103,7 @@ export default async function handler(req, res) {
       return sendJson(res, 500, {
         error: "Request failed",
         details:
-          "Halltickets schema mismatch in Appwrite. Required attributes: userId (string), hallticketId (string), examName (string), pdfUrl (string), isDownloaded (boolean), status (string), queuePosition (integer).",
+          "Halltickets schema mismatch in Appwrite. Minimum required attributes: userId (string), status (string). Recommended: queuePosition (integer), isDownloaded (boolean), hallticketId (string), examName (string), pdfUrl (string).",
       });
     }
 
