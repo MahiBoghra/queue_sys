@@ -1,4 +1,64 @@
 import { DOWNLOAD_WINDOW_SECONDS, QUEUE_RATE_LIMIT_PER_SECOND } from "./config.js";
+import fs from "fs";
+import os from "os";
+import path from "path";
+
+const STATE_FILE = path.join(os.tmpdir(), "queue_sys_state.json");
+
+function createDefaultState() {
+  return {
+    secondWindow: 0,
+    processedCount: 0,
+    queue: [],
+    jobByUserId: new Map(),
+  };
+}
+
+function serializeState(state) {
+  const jobs = {};
+  state.jobByUserId.forEach((job, userId) => {
+    jobs[userId] = job;
+  });
+
+  return {
+    secondWindow: Number(state.secondWindow) || 0,
+    processedCount: Number(state.processedCount) || 0,
+    queue: Array.isArray(state.queue) ? state.queue : [],
+    jobs,
+  };
+}
+
+function hydrateState(raw) {
+  const state = createDefaultState();
+  if (!raw || typeof raw !== "object") return state;
+
+  state.secondWindow = Number(raw.secondWindow) || 0;
+  state.processedCount = Number(raw.processedCount) || 0;
+  state.queue = Array.isArray(raw.queue) ? raw.queue : [];
+
+  const jobs = raw.jobs && typeof raw.jobs === "object" ? raw.jobs : {};
+  state.jobByUserId = new Map(Object.entries(jobs));
+  return state;
+}
+
+function readStateFromDisk() {
+  try {
+    if (!fs.existsSync(STATE_FILE)) return null;
+    const raw = fs.readFileSync(STATE_FILE, "utf8");
+    if (!raw) return null;
+    return hydrateState(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function writeStateToDisk(state) {
+  try {
+    fs.writeFileSync(STATE_FILE, JSON.stringify(serializeState(state)), "utf8");
+  } catch {
+    // Keep queue operations functional even if disk persistence is unavailable.
+  }
+}
 
 const globalState = globalThis.__QUEUE_STATE__ || {
   secondWindow: 0,
@@ -8,6 +68,20 @@ const globalState = globalThis.__QUEUE_STATE__ || {
 };
 
 globalThis.__QUEUE_STATE__ = globalState;
+
+function syncStateFromDisk() {
+  const diskState = readStateFromDisk();
+  if (!diskState) return;
+
+  globalState.secondWindow = diskState.secondWindow;
+  globalState.processedCount = diskState.processedCount;
+  globalState.queue = diskState.queue;
+  globalState.jobByUserId = diskState.jobByUserId;
+}
+
+function persistState() {
+  writeStateToDisk(globalState);
+}
 
 function getNowSecond() {
   return Math.floor(Date.now() / 1000);
@@ -69,6 +143,7 @@ function buildQueuedMetrics(position) {
 }
 
 export function requestSlot(userId, hallticket) {
+  syncStateFromDisk();
   processQueue();
 
   const existing = globalState.jobByUserId.get(userId);
@@ -76,7 +151,9 @@ export function requestSlot(userId, hallticket) {
   if (existing?.status === "ready") {
     if (Date.now() > existing.expiresAt) {
       globalState.jobByUserId.delete(userId);
+      persistState();
     } else {
+      persistState();
       return {
         status: "ready",
         waitMessage: "Your hall ticket is ready for download.",
@@ -89,6 +166,7 @@ export function requestSlot(userId, hallticket) {
   if (existing?.status === "queued") {
     const position = globalState.queue.indexOf(userId) + 1;
     const metrics = buildQueuedMetrics(position);
+    persistState();
     return {
       status: "queued",
       ...metrics,
@@ -103,6 +181,7 @@ export function requestSlot(userId, hallticket) {
     markReady(userId, hallticket);
 
     const job = globalState.jobByUserId.get(userId);
+    persistState();
     return {
       status: "ready",
       waitMessage: "Your hall ticket is ready for download.",
@@ -120,6 +199,7 @@ export function requestSlot(userId, hallticket) {
   });
 
   const metrics = buildQueuedMetrics(globalState.queue.length);
+  persistState();
 
   return {
     status: "queued",
@@ -129,10 +209,12 @@ export function requestSlot(userId, hallticket) {
 }
 
 export function getStatus(userId) {
+  syncStateFromDisk();
   processQueue();
 
   const job = globalState.jobByUserId.get(userId);
   if (!job) {
+    persistState();
     return {
       status: "idle",
       waitMessage: "No active request. Click generate hall ticket.",
@@ -142,12 +224,14 @@ export function getStatus(userId) {
   if (job.status === "ready") {
     if (Date.now() > job.expiresAt) {
       globalState.jobByUserId.delete(userId);
+      persistState();
       return {
         status: "expired",
         waitMessage: "Download window expired. Request again.",
       };
     }
 
+    persistState();
     return {
       status: "ready",
       hallticket: job.hallticket,
@@ -159,6 +243,7 @@ export function getStatus(userId) {
 
   const position = globalState.queue.indexOf(userId) + 1;
   const metrics = buildQueuedMetrics(position);
+  persistState();
   return {
     status: "queued",
     ...metrics,
@@ -167,6 +252,7 @@ export function getStatus(userId) {
 }
 
 export function getQueueSnapshot() {
+  syncStateFromDisk();
   processQueue();
 
   const snapshot = {
@@ -181,23 +267,29 @@ export function getQueueSnapshot() {
     };
   });
 
+  persistState();
+
   return snapshot;
 }
 
 export function getQueueMetaForUser(userId) {
+  syncStateFromDisk();
   processQueue();
 
   const job = globalState.jobByUserId.get(userId);
   if (!job) {
+    persistState();
     return { status: "idle", queuePosition: 0 };
   }
 
   if (job.status === "queued") {
+    persistState();
     return {
       status: "waiting",
       queuePosition: Math.max(globalState.queue.indexOf(userId) + 1, 0),
     };
   }
 
+  persistState();
   return { status: "ready", queuePosition: 0 };
 }
