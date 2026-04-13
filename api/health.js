@@ -1,3 +1,12 @@
+/**
+ * @file health.js
+ * @description GET /api/health
+ *   Lightweight liveness probe.  Returns service name, status, and current
+ *   server timestamp.  Used by uptime monitors and load balancers to confirm
+ *   the process is running and routing requests correctly.
+ * @module api/health
+ */
+
 import { sendJson, onlyGet } from "./_lib/http.js";
 import {
   APPWRITE_CONFIG_COLLECTION_ID,
@@ -11,9 +20,9 @@ import {
 export default async function handler(req, res) {
   if (!onlyGet(req, res)) return;
 
-  sendJson(res, 200, {
-    service: "queue-hallticket-middleware",
-    status: "ok",
+  return sendJson(res, 200, {
+    service:   "queue-hallticket-middleware",
+    status:    "ok",
     timestamp: new Date().toISOString(),
     appwriteConfig: {
       hasEndpoint: Boolean(APPWRITE_ENDPOINT),

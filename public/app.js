@@ -1,63 +1,96 @@
-const loginScreen = document.getElementById("login-screen");
-const dashboardScreen = document.getElementById("dashboard-screen");
-const loginForm = document.getElementById("login-form");
-const signupForm = document.getElementById("signup-form");
-const loginMessage = document.getElementById("login-message");
-const loginTab = document.getElementById("login-tab");
-const signupTab = document.getElementById("signup-tab");
-const signupRole = document.getElementById("signup-role");
+/**
+ * @file app.js
+ * @description Frontend application logic for the University Hall Ticket Queue Portal.
+ *   Handles authentication UI, session countdown, virtual queue polling,
+ *   Appwrite Realtime subscriptions, and hall ticket HTML download flow.
+ *
+ *   Naming conventions used in this file:
+ *     - DOM element references : camelCase, named after their element ID (e.g. loginScreen)
+ *     - Module-level state vars : camelCase with "g_" prefix documented in the block below
+ *     - Local variables         : camelCase, descriptive
+ *     - Private helper functions: camelCase, verb-first (e.g. showLoginMode, startQueuePolling)
+ */
+
+// ---------------------------------------------------------------------------
+// DOM element references  (read-only after DOMContentLoaded)
+// ---------------------------------------------------------------------------
+
+const loginScreen         = document.getElementById("login-screen");
+const dashboardScreen     = document.getElementById("dashboard-screen");
+const loginForm           = document.getElementById("login-form");
+const signupForm          = document.getElementById("signup-form");
+const loginMessage        = document.getElementById("login-message");
+const loginTab            = document.getElementById("login-tab");
+const signupTab           = document.getElementById("signup-tab");
+const signupRole          = document.getElementById("signup-role");
 const studentSignupFields = document.getElementById("student-signup-fields");
 const facultySignupFields = document.getElementById("faculty-signup-fields");
-const requestBtn = document.getElementById("request-btn");
-const statusText = document.getElementById("status-text");
-const queuePosition = document.getElementById("queue-position");
-const queueDetails = document.getElementById("queue-details");
-const downloadBox = document.getElementById("download-box");
-const downloadJsonBtn = document.getElementById("download-json-btn");
-const hallticketExam = document.getElementById("hallticket-exam");
-const logoutBtn = document.getElementById("logout-btn");
-const sessionTimer = document.getElementById("session-timer");
-const studentGrid = document.getElementById("student-grid");
-const facultyGrid = document.getElementById("faculty-grid");
-const studentActions = document.getElementById("student-actions");
-const hallticketPreview = document.getElementById("hallticket-preview");
-const ticketStudentName = document.getElementById("ticket-student-name");
-const ticketRollNumber = document.getElementById("ticket-roll-number");
-const ticketDepartment = document.getElementById("ticket-department");
-const department = document.getElementById("department");
-const designation = document.getElementById("designation");
-const facultyMonitorBox = document.getElementById("faculty-monitor-box");
-const refreshMonitorBtn = document.getElementById("refresh-monitor-btn");
-const monitorTbody = document.getElementById("monitor-tbody");
-const monitorMeta = document.getElementById("monitor-meta");
+const requestBtn          = document.getElementById("request-btn");
+const statusText          = document.getElementById("status-text");
+const queuePosition       = document.getElementById("queue-position");
+const queueDetails        = document.getElementById("queue-details");
+const downloadBox         = document.getElementById("download-box");
+const downloadJsonBtn     = document.getElementById("download-json-btn");
+const hallticketExam      = document.getElementById("hallticket-exam");
+const logoutBtn           = document.getElementById("logout-btn");
+const sessionTimer        = document.getElementById("session-timer");
+const studentGrid         = document.getElementById("student-grid");
+const facultyGrid         = document.getElementById("faculty-grid");
+const studentActions      = document.getElementById("student-actions");
+const hallticketPreview   = document.getElementById("hallticket-preview");
+const ticketStudentName   = document.getElementById("ticket-student-name");
+const ticketRollNumber    = document.getElementById("ticket-roll-number");
+const ticketDepartment    = document.getElementById("ticket-department");
+const department          = document.getElementById("department");
+const designation         = document.getElementById("designation");
+const facultyMonitorBox   = document.getElementById("faculty-monitor-box");
+const refreshMonitorBtn   = document.getElementById("refresh-monitor-btn");
+const monitorTbody        = document.getElementById("monitor-tbody");
+const monitorMeta         = document.getElementById("monitor-meta");
+const realtimeModal       = document.getElementById("realtime-modal");
+const modalName           = document.getElementById("modal-name");
+const modalExam           = document.getElementById("modal-exam");
+const modalTime           = document.getElementById("modal-time");
+const closeModalBtn       = document.getElementById("close-modal-btn");
+const facultyQueueLimit   = document.getElementById("faculty-queue-limit");
+const updateLimitBtn      = document.getElementById("update-limit-btn");
+const limitUpdateMsg      = document.getElementById("limit-update-msg");
 
-const realtimeModal = document.getElementById("realtime-modal");
-const modalName = document.getElementById("modal-name");
-const modalExam = document.getElementById("modal-exam");
-const modalTime = document.getElementById("modal-time");
-const closeModalBtn = document.getElementById("close-modal-btn");
+// ---------------------------------------------------------------------------
+// Module-level state  (g_ prefix marks these as non-local)
+// ---------------------------------------------------------------------------
 
-const facultyQueueLimit = document.getElementById("faculty-queue-limit");
-const updateLimitBtn = document.getElementById("update-limit-btn");
-const limitUpdateMsg = document.getElementById("limit-update-msg");
+/** @type {object|null} Appwrite Client SDK instance, set after public-config is fetched. */
+let g_appwriteClient = null;
 
-let appwriteClient = null;
-let appwriteConfig = null;
-let realtimeUnsubscribe = null;
+/** @type {object|null} Public Appwrite config (endpoint, projectId, collectionIds). */
+let g_appwriteConfig = null;
 
-let pollTimer = null;
-let sessionExpiresAt = null;
-let sessionCountdown = null;
-let currentRole = "student";
-let currentUserData = null;
+/** @type {Function|null} Cleanup function returned by Appwrite Realtime subscribe(). */
+let g_realtimeUnsubscribe = null;
+
+/** @type {number|null} setInterval handle for queue-status polling. */
+let g_pollTimer = null;
+
+/** @type {number|null} Epoch ms when the current session expires. */
+let g_sessionExpiresAt = null;
+
+/** @type {number|null} setInterval handle for the session countdown display. */
+let g_sessionCountdown = null;
+
+/** @type {string} Role of the currently logged-in user ("student" | "faculty"). */
+let g_currentRole = "student";
+
+/** @type {object|null} Dashboard data for the currently logged-in student. */
+let g_currentUserData = null;
 
 async function initAppwrite() {
-  if (appwriteClient) return;
+  if (g_appwriteClient) return;
   try {
     const config = await api("/api/hallticket/public-config", { method: "GET" });
     if (config.endpoint && config.projectId) {
-      appwriteConfig = config;
-      appwriteClient = new window.Appwrite.Client()
+      g_appwriteConfig = config;
+      g_appwriteClient = new window.Appwrite.Client()
           .setEndpoint(config.endpoint)
           .setProject(config.projectId);
     }
@@ -135,13 +168,13 @@ function setStatus(message, queueMeta = null) {
 }
 
 function stopQueuePolling() {
-  if (!pollTimer) return;
-  clearInterval(pollTimer);
-  pollTimer = null;
+  if (!g_pollTimer) return;
+  clearInterval(g_pollTimer);
+  g_pollTimer = null;
 }
 
 async function refreshQueueStatus() {
-  if (currentRole !== "student") return;
+  if (g_currentRole !== "student") return;
 
   try {
     const data = await api("/api/hallticket/status", { method: "GET" });
@@ -173,7 +206,7 @@ async function refreshQueueStatus() {
 function startQueuePolling() {
   stopQueuePolling();
   refreshQueueStatus();
-  pollTimer = setInterval(refreshQueueStatus, 3000);
+  g_pollTimer = setInterval(refreshQueueStatus, 3000);
 }
 
 function showDownload(hallticket) {
@@ -186,13 +219,19 @@ function hideDownload() {
   downloadBox.classList.add("hidden");
 }
 
-function triggerJsonDownload(data, fileName) {
-  const jsonContent = JSON.stringify(data, null, 2);
-  const blob = new Blob([jsonContent], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
+/**
+ * Trigger a browser file-save for an HTML string received from the server.
+ * The hall ticket is a self-contained HTML page the student can open and print.
+ *
+ * @param {string} htmlContent - Raw HTML string returned by the server.
+ * @param {string} fileName    - Suggested filename (e.g. "hallticket_2026CS001.html").
+ */
+function triggerHtmlDownload(htmlContent, fileName) {
+  const blob  = new Blob([htmlContent], { type: "text/html" });
+  const url   = URL.createObjectURL(blob);
 
-  const anchor = document.createElement("a");
-  anchor.href = url;
+  const anchor    = document.createElement("a");
+  anchor.href     = url;
   anchor.download = fileName;
   document.body.appendChild(anchor);
   anchor.click();
@@ -260,11 +299,11 @@ async function refreshFacultyMonitor() {
 function switchToDashboard(data) {
   loginScreen.classList.add("hidden");
   dashboardScreen.classList.remove("hidden");
-  currentRole = data.user.role || "student";
+  g_currentRole = data.user.role || "student";
 
   document.getElementById("welcome-text").textContent = `Welcome, ${data.user.name}`;
 
-  if (currentRole === "faculty") {
+  if (g_currentRole === "faculty") {
     studentGrid.classList.add("hidden");
     studentActions.classList.add("hidden");
     hallticketPreview.classList.add("hidden");
@@ -289,13 +328,13 @@ function switchToDashboard(data) {
     fillHallticketPreview(data);
     setStatus("No active request yet.");
     refreshQueueStatus();
-    currentUserData = {
+    g_currentUserData = {
       name: data.user.name,
       ...data.dashboardInfo
     };
   }
 
-  sessionExpiresAt = data.sessionExpiresAt;
+  g_sessionExpiresAt = data.sessionExpiresAt;
   startSessionCountdown();
 }
 
@@ -305,21 +344,21 @@ function switchToLogin() {
   showLoginMode();
   hideDownload();
   setStatus("No active request yet.");
-  clearInterval(sessionCountdown);
+  clearInterval(g_sessionCountdown);
   stopQueuePolling();
-  if (realtimeUnsubscribe) {
-    realtimeUnsubscribe();
-    realtimeUnsubscribe = null;
+  if (g_realtimeUnsubscribe) {
+    g_realtimeUnsubscribe();
+    g_realtimeUnsubscribe = null;
   }
 }
 
 function startSessionCountdown() {
-  clearInterval(sessionCountdown);
+  clearInterval(g_sessionCountdown);
 
   const tick = () => {
-    if (!sessionExpiresAt) return;
+    if (!g_sessionExpiresAt) return;
 
-    const remainingMs = Number(sessionExpiresAt) - Date.now();
+    const remainingMs = Number(g_sessionExpiresAt) - Date.now();
     if (remainingMs <= 0) {
       sessionTimer.textContent = "Session expired";
       switchToLogin();
@@ -332,7 +371,7 @@ function startSessionCountdown() {
   };
 
   tick();
-  sessionCountdown = setInterval(tick, 1000);
+  g_sessionCountdown = setInterval(tick, 1000);
 }
 
 async function api(path, options = {}) {
@@ -443,7 +482,7 @@ signupForm.addEventListener("submit", async (event) => {
 });
 
 requestBtn.addEventListener("click", async () => {
-  if (currentRole !== "student") {
+  if (g_currentRole !== "student") {
     setStatus("Faculty account is not eligible for hall ticket queue.");
     return;
   }
@@ -462,20 +501,20 @@ requestBtn.addEventListener("click", async () => {
     setStatus(data.waitMessage, data);
     startQueuePolling();
 
-    if (appwriteClient && appwriteConfig && data.docId) {
-      if (realtimeUnsubscribe) realtimeUnsubscribe();
+    if (g_appwriteClient && g_appwriteConfig && data.docId) {
+      if (g_realtimeUnsubscribe) g_realtimeUnsubscribe();
       
-      const channel = `databases.${appwriteConfig.databaseId}.collections.${appwriteConfig.hallticketsCollectionId}.documents.${data.docId}`;
+      const channel = `databases.${g_appwriteConfig.databaseId}.collections.${g_appwriteConfig.hallticketsCollectionId}.documents.${data.docId}`;
       setStatus(`Subscribed to Realtime Updates for document: ${data.docId}...`);
       
-      realtimeUnsubscribe = appwriteClient.subscribe(channel, response => {
+      g_realtimeUnsubscribe = g_appwriteClient.subscribe(channel, response => {
         if (response.events.includes("databases.*.collections.*.documents.*.update")) {
             const updated = response.payload;
             if (updated.status === "DONE" || updated.status === "READY") {
                 stopQueuePolling();
                 setStatus("Hall ticket ready.");
                 showDownloadModal(updated);
-                if (realtimeUnsubscribe) { realtimeUnsubscribe(); realtimeUnsubscribe = null; }
+                if (g_realtimeUnsubscribe) { g_realtimeUnsubscribe(); g_realtimeUnsubscribe = null; }
             } else {
                 refreshQueueStatus();
             }
@@ -491,9 +530,9 @@ requestBtn.addEventListener("click", async () => {
 
 function showDownloadModal(hallticket) {
   realtimeModal.classList.remove("hidden");
-  modalName.textContent = currentUserData?.name || "Student";
+  modalName.textContent = g_currentUserData?.name || "Student";
   modalExam.textContent = hallticket.examName || "Final Exams";
-  modalTime.textContent = currentUserData?.examDate || "N/A";
+  modalTime.textContent = g_currentUserData?.examDate || "N/A";
   
   // also prepare the usual JSON box logic
   hallticketExam.textContent = hallticket.examName;
@@ -506,15 +545,33 @@ closeModalBtn.addEventListener("click", () => {
 
 downloadJsonBtn.addEventListener("click", async () => {
   try {
-    const payload = await api("/api/hallticket/download-json", { method: "GET" });
-    triggerJsonDownload(payload.hallticketData, payload.downloadFileName);
+    // Fetch the hall ticket as a raw HTML response (not JSON).
+    const response = await fetch("/api/hallticket/download-json", {
+      method: "GET",
+      credentials: "include",
+    });
 
+    if (!response.ok) {
+      // On error the server still sends JSON with an "error" field.
+      const errData = await response.json();
+      throw new Error(errData.error || "Download failed.");
+    }
+
+    // Extract filename from Content-Disposition header if present, else fallback.
+    const disposition   = response.headers.get("Content-Disposition") || "";
+    const fileNameMatch = disposition.match(/filename="?([^";\s]+)"?/);
+    const fileName      = fileNameMatch ? fileNameMatch[1] : "hallticket.html";
+
+    const htmlContent = await response.text();
+    triggerHtmlDownload(htmlContent, fileName);
+
+    // Mark as downloaded in queue engine + DB.
     await api("/api/hallticket/mark-downloaded", {
       method: "POST",
       body: JSON.stringify({}),
     });
 
-    setStatus("Hall ticket JSON downloaded and marked as completed.");
+    setStatus("Hall ticket downloaded. Open the file in a browser and press Ctrl+P to print.");
     stopQueuePolling();
   } catch (error) {
     setStatus(error.message);

@@ -1,3 +1,19 @@
+/**
+ * @file appwrite.js
+ * @description Data-access layer.  Abstracts all database operations behind
+ *   a consistent async interface.  When no Appwrite environment variables
+ *   are set the module automatically falls back to the in-memory mockStore,
+ *   enabling full local development without any external services.
+ *
+ *   Exported functions:
+ *     authenticateUser, createUser, getDashboardInfo,
+ *     getHallticket, getStudentHallticketData, markHallticketDownloaded,
+ *     listStudentsForMonitor, getHallticketStatusMap,
+ *     getQueueConfig, setQueueConfig, getActiveQueueCount,
+ *     updateHallticketQueueStatus
+ * @module _lib/appwrite
+ */
+
 import { Client, Databases, ID, Query } from "appwrite";
 import fs from "fs";
 import os from "os";
